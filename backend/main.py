@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.api import api_router
 
 
 @asynccontextmanager
@@ -47,6 +48,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ─── 注册路由 ───
+app.include_router(api_router)
 
 # ─── 健康检查 ───
 @app.get("/health", tags=["System"])
