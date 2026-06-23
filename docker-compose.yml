@@ -1,0 +1,217 @@
+# ============================================================
+# KnowFlow — Docker Compose 编排
+# 启动所有核心服务: docker compose up -d
+# 查看日志: docker compose logs -f
+# 停止: docker compose down
+# ============================================================
+
+version: "3.8"
+
+services:
+  # ──────────────────────────────────────────────
+  # FastAPI 后端
+  # ──────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: knowflow-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MILVUS_HOST=milvus-standalone
+      - MILVUS_PORT=19530
+      - MINIO_ENDPOINT=minio:9000
+    volumes:
+      - ./backend:/app
+      - upload_data:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  # ──────────────────────────────────────────────
+  # Streamlit 前端
+  # ──────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: knowflow-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  # ──────────────────────────────────────────────
+  # PostgreSQL — 业务数据存储
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: knowflow-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: knowflow
+      POSTGRES_PASSWORD: knowflow_secret
+      POSTGRES_DB: knowflow
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  # ──────────────────────────────────────────────
+  # Redis — 缓存 + 消息队列
+  # ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: knowflow-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  # ──────────────────────────────────────────────
+  # Milvus — 向量数据库
+  # ──────────────────────────────────────────────
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: knowflow-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.5.0
+    container_name: knowflow-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  # ──────────────────────────────────────────────
+  # MinIO — 对象存储 (Milvus 依赖 + 文档存储)
+  # ──────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: knowflow-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+  # ──────────────────────────────────────────────
+  # Celery Worker — 异步任务
+  # ──────────────────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: knowflow-worker
+    command: celery -A tasks worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - knowflow-network
+
+# ──────────────────────────────────────────────
+# 数据卷
+# ──────────────────────────────────────────────
+volumes:
+  pgdata:
+  etcd_data:
+  milvus_data:
+  minio_data:
+  upload_data:
+
+# ──────────────────────────────────────────────
+# 网络
+# ──────────────────────────────────────────────
+networks:
+  knowflow-network:
+    driver: bridge
