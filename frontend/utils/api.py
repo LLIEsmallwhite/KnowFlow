@@ -62,9 +62,10 @@ class KnowFlowAPI:
     # ─── Documents ───
 
     def upload_document(self, kb_id: str, file_path: str,
-                        title: str = None) -> dict:
+                        title: str = None, original_name: str = None) -> dict:
+        filename = original_name or os.path.basename(file_path)
         with open(file_path, "rb") as f:
-            files = {"file": (os.path.basename(file_path), f)}
+            files = {"file": (filename, f)}
             data = {}
             if title:
                 data["title"] = title

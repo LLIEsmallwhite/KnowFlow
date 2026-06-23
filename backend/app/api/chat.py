@@ -67,6 +67,12 @@ class ChatResponse(BaseModel):
 # ─── LLM Instance ───
 
 def _get_stream_llm():
+    callbacks = []
+    if settings.LANGFUSE_ENABLED:
+        from app.observability.langfuse_client import langfuse_manager
+        cb = langfuse_manager.get_langchain_callback()
+        if cb:
+            callbacks.append(cb)
     return ChatOpenAI(
         model=settings.LLM_MODEL,
         api_key=settings.LLM_API_KEY,
@@ -74,6 +80,7 @@ def _get_stream_llm():
         temperature=settings.LLM_TEMPERATURE,
         max_tokens=settings.LLM_MAX_TOKENS,
         streaming=True,
+        callbacks=callbacks if callbacks else None,
     )
 
 
@@ -177,12 +184,21 @@ async def chat_stream(
         query = request.query.strip()
         kb_ids = request.kb_ids
 
+        from datetime import datetime
+        now_str = datetime.now().strftime("%Y年%m月%d日 %A")
+        time_hint = f"\n[系统时间: {now_str}]"
+
         logger.info("Chat stream: query='%s', kb_ids=%s", query[:80], kb_ids)
 
-        # Step 1: Search (non-streaming)
-        search_info = {"rrf_weights": {}, "vector_hits": 0, "keyword_hits": 0}
+        # Langfuse tracing
+        from app.observability.langfuse_client import langfuse_manager
+
+        search_info = {"rrf_weights": {}, "vector_hits": 0, "keyword_hits": 0, "web_results": 0}
         context_text = ""
         knowledge_refs = []
+
+        # Web search disabled (blocked in China, use LLM's knowledge instead)
+        # if request.enable_web_search: ...
 
         try:
             from app.graph.rag_pipeline import (
@@ -211,6 +227,13 @@ async def chat_stream(
             search_info["vector_hits"] = len(hr.vector_results)
             search_info["keyword_hits"] = len(hr.keyword_results)
 
+            # Trace retrieval stats
+            with langfuse_manager.trace("hybrid-search", session_id=session_id,
+                                         metadata={"query": query, "rewritten": rewritten,
+                                                   "vector_hits": search_info["vector_hits"],
+                                                   "keyword_hits": search_info["keyword_hits"]}):
+                pass  # Auto-logged via context manager
+
             if hr.vector_results or hr.keyword_results:
                 rrf = _get_dynamic_rrf()
                 fused = rrf.fuse(rewritten, hr.vector_results, hr.keyword_results)
@@ -234,17 +257,50 @@ async def chat_stream(
                 merged = merger.merge(fused, top_k=settings.RERANK_TOP_K)
                 context_text = merger.format_for_llm(merged)
 
-                # Build a lookup from chunk_id to fused RRFChunk for doc metadata
-                fused_map = {getattr(f, 'chunk_id', ''): f for f in fused}
+                # Build valid chunk_id set from DB (single source of truth)
+                from app.models.chunk import Chunk as ChunkModel
+                from sqlalchemy import select as sql_select
+                valid_ids = set()
+                chunk_doc_map = {}
+                # Get all indexable chunks with doc names from DB
+                all_db_chunks = await db.execute(
+                    sql_select(ChunkModel.id, ChunkModel.document_id, ChunkModel.content)
+                    .where(ChunkModel.knowledge_base_id.in_(kb_ids) if kb_ids else True)
+                )
+                doc_cache = {}
+                for row in all_db_chunks:
+                    cid, doc_id, content = row[0], row[1], row[2]
+                    valid_ids.add(cid)
+                    if doc_id not in doc_cache:
+                        from app.models.document import Document as DocModel
+                        dresult = await db.execute(
+                            sql_select(DocModel.title).where(DocModel.id == doc_id)
+                        )
+                        doc_cache[doc_id] = dresult.scalar_one_or_none() or ""
+                    chunk_doc_map[cid] = doc_cache[doc_id]
+                    chunk_doc_map[(content or "")[:80]] = doc_cache[doc_id]
+
+                seen_content = set()
                 for ctx in merged:
                     for cid in ctx.chunk_ids[:3]:
-                        fchunk = fused_map.get(cid)
+                        # Skip chunks not in DB (stale Milvus data)
+                        if cid not in valid_ids and cid not in chunk_doc_map:
+                            continue
+                        content_sig = ctx.content[:100]
+                        if content_sig in seen_content:
+                            continue
+                        seen_content.add(content_sig)
+
+                        display_name = chunk_doc_map.get(cid, "")
+                        if not display_name:
+                            display_name = chunk_doc_map.get(ctx.content[:80], "")
+
                         knowledge_refs.append({
                             "chunk_id": cid,
                             "content_preview": ctx.content[:200],
                             "score": ctx.relevance_score,
-                            "doc_title": getattr(fchunk, 'doc_title', '') if fchunk else '',
-                            "doc_filename": getattr(fchunk, 'doc_filename', '') if fchunk else '',
+                            "doc_title": display_name,
+                            "doc_filename": display_name,
                             "full_content": ctx.content,
                         })
 
@@ -261,25 +317,31 @@ async def chat_stream(
         try:
             stream_llm = _get_stream_llm()
 
-            if context_text:
+            # Combine KB context + web results
+            full_context = context_text
+            if web_context:
+                full_context = (context_text + "\n\n---\n网络搜索结果：\n" + web_context).strip()
+                if not context_text:
+                    full_context = "网络搜索结果：\n" + web_context
+
+            if full_context:
                 system_prompt = (
-                    "你是一个专业的企业知识库问答助手。请**仅根据**以下参考文档回答用户问题。\n"
-                    "规则：\n"
-                    "1. 严格基于参考文档内容回答，不得编造或猜测\n"
-                    "2. 回答时标注来源，如 [文档名] 或 [来源编号]\n"
-                    "3. 如果参考文档不足以回答问题，请明确说明：'文档中未包含此信息'\n"
+                    "你是一个专业的企业知识库问答助手。请**仅根据**参考资料回答。\n"
+                    "规则：严格基于参考资料，优先知识库文档，其次网络结果。"
                 )
-                user_prompt = f"参考文档：\n\n{context_text}\n\n---\n用户问题：{query}\n\n请基于以上文档回答："
+                user_prompt = f"参考资料：\n\n{full_context}\n\n---\n用户问题：{query}{time_hint}\n\n请回答："
+            elif request.enable_web_search:
+                system_prompt = (
+                    "你是一个企业知识库问答助手。用户已启用联网搜索。\n"
+                    "请用你自己的知识回答用户问题（如日期、常识、新闻等）。"
+                )
+                user_prompt = f"{query}{time_hint}"
             else:
                 system_prompt = (
-                    "你是一个企业知识库问答助手。\n"
-                    "重要：当前**没有检索到任何相关文档**。\n"
-                    "如果用户问的是事实性问题（如公司内部信息、产品文档、技术规范等），"
-                    "请拒绝回答，并建议用户上传相关文档到知识库。\n"
-                    "例如回复：'抱歉，知识库中暂无相关内容。请先上传相关文档到知识库后再提问。'\n"
-                    "只有在用户进行简单的寒暄或闲聊时（如'你好'、'今天天气'），才可以直接回复。"
+                    "你是一个企业知识库问答助手。当前没有检索到相关资料。\n"
+                    "拒绝回答事实性问题，建议上传文档。闲聊和常识可直接回复。"
                 )
-                user_prompt = query
+                user_prompt = f"{query}{time_hint}"
 
             messages = [
                 SystemMessage(content=system_prompt),
@@ -312,6 +374,18 @@ async def chat_stream(
                 await s.commit()
         except Exception as e:
             logger.error("Failed to persist assistant message: %s", e)
+
+        # Trace completion
+        try:
+            with langfuse_manager.trace("rag-chat", session_id=session_id,
+                                         metadata={"query": query,
+                                                   "vector_hits": search_info.get("vector_hits", 0),
+                                                   "keyword_hits": search_info.get("keyword_hits", 0),
+                                                   "ref_count": len(knowledge_refs)},
+                                         input_data={"answer": full_answer[:500]}):
+                pass
+        except Exception:
+            pass
 
         yield "data: [DONE]\n\n"
 

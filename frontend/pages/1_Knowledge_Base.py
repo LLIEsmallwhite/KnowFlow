@@ -146,6 +146,7 @@ with tab_upload:
                             target_kb_id,
                             tmp_path,
                             title=uf.name,
+                            original_name=uf.name,
                         )
 
                         # Cleanup temp

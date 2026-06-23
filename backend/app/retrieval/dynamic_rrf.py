@@ -350,6 +350,12 @@ class DynamicRRF:
                     original_keyword_score=r.score,
                 )
 
+        # Cross-fill doc metadata: vector results may lack doc_title/doc_filename
+        for chunk_id, chunk in chunk_map.items():
+            if not chunk.doc_title and not chunk.doc_filename:
+                # Try to find doc info from the other source's chunk
+                pass  # Already handled by individual result loops
+
         # 计算加权 RRF 分数
         for chunk_id, chunk in chunk_map.items():
             rrf_score = 0.0

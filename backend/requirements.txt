@@ -47,6 +47,9 @@ jieba>=0.42.1           # Chinese word segmentation
 rank-bm25>=0.2.2         # BM25 algorithm
 tiktoken>=0.8.0          # OpenAI token counter
 
+# --- Web Search ---
+duckduckgo-search>=7.0.0
+
 # --- Rerank Model ---
 dashscope>=1.20.0
 sentence-transformers>=3.3.0

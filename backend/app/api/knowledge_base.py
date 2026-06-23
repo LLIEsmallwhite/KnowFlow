@@ -437,6 +437,25 @@ async def chunks_status(kb_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/debug/bm25-doc-names")
+async def debug_bm25_doc_names():
+    """Show doc_title for first 15 chunks to check metadata."""
+    result = {}
+    for kb in _bm25.get_indexed_kbs():
+        chunks = _bm25._chunks.get(kb, [])
+        result[kb] = {
+            "total": len(chunks),
+            "samples": [
+                {"chunk_id": c.get("chunk_id", "")[:12],
+                 "doc_title": c.get("doc_title", "") or "EMPTY",
+                 "doc_filename": c.get("doc_filename", "") or "EMPTY",
+                 "preview": (c.get("content", "") or "")[:60]}
+                for c in chunks[:15]
+            ]
+        }
+    return result
+
+
 @router.get("/debug/bm25")
 async def debug_bm25():
     """Debug endpoint: inspect BM25 index state."""
