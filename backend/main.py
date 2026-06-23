@@ -53,6 +53,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"   Milvus: unavailable ({e})")
 
+    # Auto-rebuild BM25 from DB chunks
+    try:
+        from app.retrieval import shared_bm25
+        from app.services.kb_crud import kb_crud
+        from app.services.chunk_crud import chunk_crud
+        from app.retrieval.bm25_retriever import build_bm25_index_from_db
+        from app.core.database import async_session_factory
+        async with async_session_factory() as db:
+            kbs = await kb_crud.list(db)
+            total = 0
+            for kb in kbs:
+                indexable = await chunk_crud.get_indexable(db, kb.id)
+                if indexable:
+                    build_bm25_index_from_db(kb.id, indexable, shared_bm25)
+                    total += len(indexable)
+            print(f"   BM25: rebuilt from DB ({total} chunks across {len(kbs)} KBs)")
+    except Exception as e:
+        print(f"   BM25: rebuild failed ({e})")
+
     yield
     # Shutdown
     await close_db()

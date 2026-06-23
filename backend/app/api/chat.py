@@ -317,19 +317,12 @@ async def chat_stream(
         try:
             stream_llm = _get_stream_llm()
 
-            # Combine KB context + web results
-            full_context = context_text
-            if web_context:
-                full_context = (context_text + "\n\n---\n网络搜索结果：\n" + web_context).strip()
-                if not context_text:
-                    full_context = "网络搜索结果：\n" + web_context
-
-            if full_context:
+            if context_text:
                 system_prompt = (
                     "你是一个专业的企业知识库问答助手。请**仅根据**参考资料回答。\n"
                     "规则：严格基于参考资料，优先知识库文档，其次网络结果。"
                 )
-                user_prompt = f"参考资料：\n\n{full_context}\n\n---\n用户问题：{query}{time_hint}\n\n请回答："
+                user_prompt = f"参考资料：\n\n{context_text}\n\n---\n用户问题：{query}{time_hint}\n\n请回答："
             elif request.enable_web_search:
                 system_prompt = (
                     "你是一个企业知识库问答助手。用户已启用联网搜索。\n"

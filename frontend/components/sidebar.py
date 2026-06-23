@@ -89,10 +89,8 @@ def render_sidebar():
         # ─── Settings ───
         st.markdown("### ⚙️ 设置")
 
-        web_search = st.toggle(
-            "🌐 联网搜索", value=st.session_state.enable_web_search,
-        )
-        st.session_state.enable_web_search = web_search
+        # Web search disabled (blocked in China)
+        # web_search = st.toggle("联网搜索", value=st.session_state.enable_web_search)
 
         memory_mode = st.toggle(
             "🧠 记忆模式", value=st.session_state.enable_memory,

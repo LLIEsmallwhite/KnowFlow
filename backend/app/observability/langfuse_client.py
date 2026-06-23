@@ -60,14 +60,19 @@ class LangfuseManager:
             self._client = None
 
     def get_langchain_callback(self):
-        """Get LangChain CallbackHandler for automatic LLM tracing."""
+        """Get LangChain CallbackHandler (v4 API)."""
         if not self.enabled or not self.client:
             return None
         try:
-            from langfuse.callback import CallbackHandler
+            from langfuse.langchain import CallbackHandler
             return CallbackHandler()
         except ImportError:
-            return None
+            try:
+                from langfuse.callback import CallbackHandler
+                return CallbackHandler()
+            except ImportError:
+                logger.warning("langfuse callback not available")
+                return None
 
     @contextmanager
     def trace(self, name: str, session_id: str = None, metadata: dict = None,
@@ -91,11 +96,13 @@ class LangfuseManager:
             logger.debug("Langfuse trace error: %s", e)
             yield _NoOpSpan()
         finally:
-            if span and self.client:
-                try:
+            try:
+                if span:
+                    span.end()
+                if self.client:
                     self.client.flush()
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
 
 class _NoOpSpan:
@@ -119,16 +126,13 @@ class _LangfuseSpan:
                 pass
 
     def finish(self, output=None, metadata=None):
-        """Finish the trace with output and metadata."""
+        """Finish the trace with output."""
         if self._trace:
             try:
-                duration = time.time() - self._start
-                update = {"duration": duration}
-                if output is not None:
-                    update["output"] = output
-                if metadata:
-                    update["metadata"] = metadata
-                self._trace.update(**update)
+                self._trace.update(
+                    output=output,
+                    metadata=metadata or {},
+                )
             except Exception:
                 pass
 

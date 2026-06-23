@@ -22,9 +22,21 @@ class KnowFlowAPI:
 
     @property
     def client(self) -> httpx.Client:
-        if self._client is None:
+        if self._client is None or self._client.is_closed:
             self._client = httpx.Client(timeout=60.0)
         return self._client
+
+    def _get(self, path: str, **kw):
+        """GET with retry on connection error."""
+        try:
+            r = self.client.get(self._url(path), **kw)
+            r.raise_for_status()
+            return r.json()
+        except httpx.ConnectError:
+            self._client = None  # Reset stale client
+            r = self.client.get(self._url(path), **kw)
+            r.raise_for_status()
+            return r.json()
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
@@ -39,9 +51,7 @@ class KnowFlowAPI:
     # ─── Knowledge Bases ───
 
     def list_kbs(self) -> List[dict]:
-        r = self.client.get(self._url("/api/v1/knowledge-bases"))
-        r.raise_for_status()
-        return r.json()
+        return self._get("/api/v1/knowledge-bases")
 
     def create_kb(self, name: str, description: str = None,
                   kb_type: str = "document") -> dict:
