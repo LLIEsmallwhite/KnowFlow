@@ -57,3 +57,4 @@ minio_data/
 
 # Celery
 celerybeat-schedule
+/sample_docs/
