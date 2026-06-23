@@ -15,6 +15,7 @@ import concurrent.futures
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
+from app.core.config import settings
 from app.retrieval.dense_retriever import DenseRetriever
 from app.retrieval.bm25_retriever import BM25Retriever, BM25Result
 from app.retrieval.milvus_client import SearchResult as DenseResult
@@ -82,7 +83,7 @@ class HybridSearchOrchestrator:
         vector_top_k: int = 50,
         keyword_top_k: int = 50,
         vector_threshold: float = 0.15,
-        keyword_threshold: float = 0.30,
+        keyword_threshold: float = None,
     ) -> HybridSearchResult:
         """
         执行混合检索（并行）
@@ -99,6 +100,12 @@ class HybridSearchOrchestrator:
             HybridSearchResult（包含两路检索结果）
         """
         result = HybridSearchResult(query=query)
+
+        # Use settings defaults if not specified
+        if keyword_threshold is None:
+            keyword_threshold = settings.KEYWORD_THRESHOLD
+        if vector_threshold is None:
+            vector_threshold = settings.VECTOR_THRESHOLD
 
         # 并行执行两路检索
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:

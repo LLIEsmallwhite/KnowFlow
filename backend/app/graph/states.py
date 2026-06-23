@@ -10,7 +10,7 @@ LangGraph 使用 TypedDict 作为节点间传递的状态对象。
 """
 
 from typing import TypedDict, List, Dict, Optional, Any, Annotated
-from langgraph.graph.message import add_messages
+import operator
 
 
 # ═══════════════════════════════════════════════════════════
@@ -76,8 +76,8 @@ class AgentState(TypedDict, total=False):
     system_prompt: str                      # System Prompt
 
     # ── 对话历史 ──
-    # 使用 Annotated + add_messages 实现消息去重累积
-    messages: Annotated[List[dict], add_messages]
+    # Plain dict messages (use operator.add for simple list appending)
+    messages: Annotated[List[dict], operator.add]
 
     # ── 当前轮 ──
     current_thought: str                    # 当前思考内容

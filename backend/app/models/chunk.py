@@ -92,7 +92,8 @@ class Chunk(Base):
     )
 
     # ─── 元信息 ───
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    extra_metadata: Mapped[Optional[dict]] = mapped_column(
+        "metadata",
         JSON,
         nullable=True,
         comment="扩展元信息 (JSON): 页码/章节标题/breadcrumb 等",

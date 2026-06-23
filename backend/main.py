@@ -11,21 +11,51 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.database import init_db, close_db
 from app.api import api_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    # 启动时执行
+    """Application lifecycle management."""
+    # Startup
     print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} starting...")
     print(f"   Debug: {settings.DEBUG}")
     print(f"   LLM: {settings.LLM_PROVIDER}/{settings.LLM_MODEL}")
     print(f"   Embedding: {settings.EMBEDDING_PROVIDER}/{settings.EMBEDDING_MODEL}")
     print(f"   Vector DB: Milvus @ {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
     print(f"   Langfuse: {'Enabled' if settings.LANGFUSE_ENABLED else 'Disabled'}")
+
+    # Initialize database tables
+    try:
+        await init_db()
+        print("   PostgreSQL: connected & tables created")
+    except Exception as e:
+        print(f"   PostgreSQL: unavailable ({e}) — running without DB persistence")
+
+    # Verify Redis
+    try:
+        import redis
+        r = redis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
+        r.ping()
+        r.close()
+        print("   Redis: connected")
+    except Exception as e:
+        print(f"   Redis: unavailable ({e})")
+
+    # Verify Milvus
+    try:
+        from pymilvus import MilvusClient as MC
+        mc = MC(uri=f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}", timeout=3)
+        collections = mc.list_collections()
+        mc.close()
+        print(f"   Milvus: connected ({len(collections)} collections)")
+    except Exception as e:
+        print(f"   Milvus: unavailable ({e})")
+
     yield
-    # 关闭时执行
+    # Shutdown
+    await close_db()
     print(f"👋 {settings.APP_NAME} shutting down...")
 
 

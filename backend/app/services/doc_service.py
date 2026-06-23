@@ -34,6 +34,8 @@ class DocumentService:
     SUPPORTED_TYPES = {
         "pdf", "docx", "doc", "md", "markdown",
         "html", "htm", "txt", "text",
+        "csv", "xlsx", "xls", "pptx", "ppt",
+        "png", "jpg", "jpeg",
     }
 
     def __init__(self):

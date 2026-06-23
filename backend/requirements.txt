@@ -48,6 +48,7 @@ rank-bm25>=0.2.2         # BM25 algorithm
 tiktoken>=0.8.0          # OpenAI token counter
 
 # --- Rerank Model ---
+dashscope>=1.20.0
 sentence-transformers>=3.3.0
 torch>=2.0.0
 

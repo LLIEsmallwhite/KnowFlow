@@ -129,14 +129,18 @@ class BM25Retriever:
             return []
 
         with self._lock:
-            # 确定要搜索的知识库
-            if kb_ids is None:
-                kb_ids = list(self._indexes.keys())
+            # Determine KBs to search (empty list = search all)
+            all_indexed = list(self._indexes.keys())
+            if not kb_ids:
+                kb_ids = all_indexed
             else:
                 kb_ids = [kb for kb in kb_ids if kb in self._indexes]
 
             if not kb_ids:
-                logger.warning("No BM25 indexes available for search")
+                logger.warning(
+                    "No BM25 indexes for search. kb_ids=%s, indexed=%s",
+                    kb_ids, all_indexed,
+                )
                 return []
 
             # 对每个知识库执行检索

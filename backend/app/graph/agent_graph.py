@@ -118,7 +118,7 @@ def agent_think_node(state: AgentState) -> AgentState:
         state["tool_calls"] = []
         state["current_thought"] = f"思考出错: {e}"
 
-    state["iteration"] = iteration
+    state["iteration"] = iteration + 1
     return state
 
 

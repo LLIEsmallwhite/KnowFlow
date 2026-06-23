@@ -3,11 +3,29 @@ KnowFlow 全局配置模块
 
 使用 Pydantic Settings 从环境变量 / .env 文件加载配置。
 所有配置项均提供合理的默认值，便于本地开发。
+
+.env 查找顺序: 当前目录 → 父目录（项目根）
 """
 
+import os
+from pathlib import Path
 from typing import Optional, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _find_env_file() -> str:
+    """查找 .env 文件：优先当前目录，其次父目录"""
+    candidates = [
+        Path.cwd() / ".env",                # 当前工作目录
+        Path.cwd().parent / ".env",          # 父目录（backend/ 运行时，项目根）
+        Path(__file__).resolve().parent.parent.parent / ".env",  # 相对于 config.py 的上级
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    # 默认返回当前目录下的 .env（即使不存在，pydantic-settings 会静默跳过）
+    return str(candidates[0])
 
 
 class Settings(BaseSettings):
@@ -17,7 +35,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_find_env_file(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="allow",

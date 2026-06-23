@@ -53,7 +53,11 @@ class PDFLoader(BaseLoader):
         except ImportError:
             raise ImportError("pypdf not installed. Run: pip install pypdf")
 
-        reader = PdfReader(file_path)
+        try:
+            reader = PdfReader(file_path)
+        except Exception as e:
+            raise ValueError(f"无法解析 PDF 文件（文件可能已损坏或不是有效的 PDF 格式）: {e}")
+
         pages = []
         for page in reader.pages:
             text = page.extract_text()
@@ -61,6 +65,9 @@ class PDFLoader(BaseLoader):
                 pages.append(text)
 
         content = "\n\n".join(pages)
+        if not content.strip():
+            raise ValueError("PDF 文件内容为空或无法提取文本")
+
         return Document(
             content=content,
             metadata={
@@ -199,6 +206,104 @@ class TxtLoader(BaseLoader):
         )
 
 
+class CSVLoader(BaseLoader):
+    """CSV 文件加载器"""
+
+    def load(self, file_path: str) -> Document:
+        import csv
+        with open(file_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+        if not rows:
+            return Document(content="", metadata={"title": Path(file_path).stem, "file_type": "csv"})
+
+        header = rows[0]
+        lines = []
+        if header:
+            lines.append(" | ".join(header))
+            lines.append("-" * len(lines[0]))
+        for row in rows[1:]:
+            lines.append(" | ".join(row))
+
+        return Document(
+            content="\n".join(lines) if lines else "",
+            metadata={
+                "title": Path(file_path).stem,
+                "row_count": len(rows),
+                "file_type": "csv",
+            },
+        )
+
+
+class ExcelLoader(BaseLoader):
+    """Excel (.xlsx) 加载器"""
+
+    def load(self, file_path: str) -> Document:
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            raise ImportError("openpyxl not installed. Run: pip install openpyxl")
+
+        wb = load_workbook(file_path, read_only=True, data_only=True)
+        all_sheets = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            all_sheets.append(f"## Sheet: {sheet_name}")
+            for row in ws.iter_rows(values_only=True):
+                row_text = " | ".join(str(cell) if cell is not None else "" for cell in row)
+                if row_text.strip():
+                    all_sheets.append(row_text)
+            all_sheets.append("")
+        wb.close()
+
+        return Document(
+            content="\n".join(all_sheets),
+            metadata={
+                "title": Path(file_path).stem,
+                "sheet_count": len(wb.sheetnames),
+                "file_type": "xlsx",
+            },
+        )
+
+
+class PPTLoader(BaseLoader):
+    """PowerPoint (.pptx) 加载器"""
+
+    def load(self, file_path: str) -> Document:
+        try:
+            from pptx import Presentation
+        except ImportError:
+            raise ImportError("python-pptx not installed. Run: pip install python-pptx")
+
+        prs = Presentation(file_path)
+        slides_text = []
+        for i, slide in enumerate(prs.slides):
+            slide_lines = [f"## Slide {i + 1}"]
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        text = para.text.strip()
+                        if text:
+                            slide_lines.append(text)
+                if shape.has_table:
+                    table = shape.table
+                    for row in table.rows:
+                        row_text = " | ".join(cell.text for cell in row.cells)
+                        if row_text.strip():
+                            slide_lines.append(row_text)
+            slides_text.append("\n".join(slide_lines))
+
+        return Document(
+            content="\n\n".join(slides_text),
+            metadata={
+                "title": Path(file_path).stem,
+                "slide_count": len(prs.slides),
+                "file_type": "pptx",
+            },
+        )
+
+
 # ─── 加载器工厂 ───
 
 LOADER_MAP = {
@@ -211,6 +316,11 @@ LOADER_MAP = {
     "htm": HTMLLoader,
     "txt": TxtLoader,
     "text": TxtLoader,
+    "csv": CSVLoader,
+    "xlsx": ExcelLoader,
+    "xls": ExcelLoader,
+    "pptx": PPTLoader,
+    "ppt": PPTLoader,
 }
 
 

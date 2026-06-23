@@ -1,22 +1,19 @@
 """
-FastAPI 依赖注入模块
+FastAPI Dependency Injection Module
 
-提供常用的可注入依赖，如：
-- 当前用户识别
-- 数据库会话
-- LLM 实例获取
-- Embedding 模型实例获取
+Provides reusable dependencies:
+- get_current_user_id: JWT auth (DEV mode allows anonymous)
+- get_db: database session
 """
 
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.config import settings
+from app.core.auth import verify_token
 
-# ─── 认证方案 ───
-# 使用 HTTP Bearer Token（JWT）
+# ─── Auth scheme ───
 security_scheme = HTTPBearer(auto_error=False)
 
 
@@ -24,18 +21,25 @@ async def get_current_user_id(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
 ) -> Optional[str]:
     """
-    从 JWT Token 中提取当前用户 ID
+    Extract current user ID from JWT token.
 
-    开发阶段允许无认证访问（返回 None）。
-    生产环境应强制验证 JWT Token。
+    In DEBUG mode, allows anonymous access (returns None).
+    In production, requires valid JWT.
     """
-    if credentials is None:
-        # 开发模式：允许匿名访问
+    if settings.DEBUG and credentials is None:
         return None
 
-    # TODO: 实现 JWT 验证逻辑
-    # token = credentials.credentials
-    # payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-    # return payload.get("sub")
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未提供认证 Token",
+        )
 
-    return None
+    token = credentials.credentials
+    user_id = verify_token(token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token 无效或已过期",
+        )
+    return user_id

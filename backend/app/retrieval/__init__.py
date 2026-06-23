@@ -17,6 +17,9 @@ from app.retrieval.hybrid_search import HybridSearchOrchestrator, HybridSearchRe
 from app.retrieval.dynamic_rrf import DynamicRRF, DynamicWeightCalculator, RRFChunk, RRFWeights
 from app.retrieval.dedup import MultiLevelDeduplicator, DedupStats
 
+# Shared singleton BM25 — used by both upload (knowledge_base.py) and search (rag_pipeline.py)
+shared_bm25 = BM25Retriever()
+
 __all__ = [
     "MilvusClient",
     "SearchResult",
@@ -31,4 +34,5 @@ __all__ = [
     "RRFWeights",
     "MultiLevelDeduplicator",
     "DedupStats",
+    "shared_bm25",
 ]

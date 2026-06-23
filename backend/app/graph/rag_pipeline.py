@@ -28,10 +28,31 @@ from app.retrieval.dynamic_rrf import DynamicRRF, RRFChunk
 from app.retrieval.dedup import MultiLevelDeduplicator
 from app.retrieval.reranker import create_reranker, NoOpReranker
 from app.retrieval.context_merge import ContextMerger
+from app.retrieval import shared_bm25
 from app.memory.consolidator import MemoryConsolidator
 from app.memory.token_estimator import TokenEstimator
 
 logger = logging.getLogger(__name__)
+
+# ─── 辅助函数 ───
+
+def _extract_token_usage(resp) -> dict:
+    """安全提取 token 用量（兼容 LangChain UsageMetadata 对象和 dict）"""
+    try:
+        um = resp.usage_metadata
+        if um is None:
+            return {}
+        if isinstance(um, dict):
+            return {
+                "prompt_tokens": um.get("input_tokens", 0),
+                "completion_tokens": um.get("output_tokens", 0),
+            }
+        return {
+            "prompt_tokens": getattr(um, "input_tokens", 0) or 0,
+            "completion_tokens": getattr(um, "output_tokens", 0) or 0,
+        }
+    except Exception:
+        return {}
 
 # ─── 全局复用的实例 ───
 _llm: Optional[ChatOpenAI] = None
@@ -62,7 +83,7 @@ def _get_llm() -> ChatOpenAI:
 def _get_hybrid_search() -> HybridSearchOrchestrator:
     global _hybrid_search
     if _hybrid_search is None:
-        _hybrid_search = HybridSearchOrchestrator()
+        _hybrid_search = HybridSearchOrchestrator(bm25_retriever=shared_bm25)
     return _hybrid_search
 
 
@@ -216,9 +237,10 @@ def dynamic_rrf_fusion_node(state: RAGState) -> RAGState:
         clean_results, stats = dedup.deduplicate(fused)
 
         state["fused_results"] = clean_results
+        wc_result = rrf.weight_calc.compute(query, vector_results, keyword_results)
         state["rrf_weights"] = {
-            "vector": rrf.weight_calc.compute(query, vector_results, keyword_results).vector,
-            "keyword": rrf.weight_calc.compute(query, vector_results, keyword_results).keyword,
+            "vector": wc_result.vector,
+            "keyword": wc_result.keyword,
         }
     except Exception as e:
         logger.error(f"RRF fusion failed: {e}")
@@ -329,10 +351,7 @@ def generate_node(state: RAGState) -> RAGState:
             messages.append(HumanMessage(content=query))
             resp = llm.invoke(messages)
             state["final_answer"] = resp.content if resp.content else "抱歉，请再试一次。"
-            state["token_usage"] = {
-                "prompt_tokens": resp.usage_metadata.get("input_tokens", 0) if hasattr(resp, 'usage_metadata') and resp.usage_metadata else 0,
-                "completion_tokens": resp.usage_metadata.get("output_tokens", 0) if hasattr(resp, 'usage_metadata') and resp.usage_metadata else 0,
-            }
+            state["token_usage"] = _extract_token_usage(resp)
         except Exception as e:
             logger.error(f"LLM generate failed: {e}")
             state["final_answer"] = f"抱歉，生成回答时出错：{str(e)[:200]}"
@@ -388,10 +407,7 @@ def generate_node(state: RAGState) -> RAGState:
 
         resp = llm.invoke(messages)
         state["final_answer"] = resp.content if resp.content else "抱歉，生成回答失败。"
-        state["token_usage"] = {
-            "prompt_tokens": resp.usage_metadata.get("input_tokens", 0) if hasattr(resp, 'usage_metadata') and resp.usage_metadata else 0,
-            "completion_tokens": resp.usage_metadata.get("output_tokens", 0) if hasattr(resp, 'usage_metadata') and resp.usage_metadata else 0,
-        }
+        state["token_usage"] = _extract_token_usage(resp)
     except Exception as e:
         logger.error(f"LLM RAG generate failed: {e}")
         state["final_answer"] = f"抱歉，生成回答时出错：{str(e)[:200]}"

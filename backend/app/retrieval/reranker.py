@@ -1,18 +1,12 @@
 """
-Cross-Encoder Reranker（重排序器）
+Cross-Encoder Reranker
 
-在 RRF 融合后对候选 Chunk 进行精排：
-- 使用 Cross-Encoder 模型直接对 (query, chunk) 对打分
-- 比 Bi-Encoder（向量检索）更精确，但速度更慢
-- 只在候选集较小（< 50）时使用
-
-支持的模型：
-- 本地: sentence-transformers (cross-encoder/ms-marco-MiniLM-L-6-v2)
-- 云端: Cohere Rerank API (rerank-multilingual-v3.0)
-
-设计参考:
-    - WeKnora chat_pipeline/rerank.go
-    - Nogueira et al., "Passage Re-ranking with BERT" (2019)
+After RRF fusion, re-rank candidate chunks for precision.
+Supported backends:
+- qwen: DashScope Qwen3-Rerank API (recommended, no HF download)
+- local: sentence-transformers CrossEncoder (needs HF download)
+- cohere: Cohere Rerank API (not yet implemented)
+- noop: pass-through without re-ranking
 """
 
 import logging
@@ -236,26 +230,81 @@ def _fallback_rerank(candidates: List, top_k: int) -> List[RerankResult]:
     return results
 
 
+class QwenReranker(BaseReranker):
+    """DashScope Qwen3-Rerank API — no model download, works in China."""
+
+    def __init__(self, model_name: str = None):
+        self.model_name = model_name or settings.RERANK_MODEL or "qwen3-rerank"
+        self._api_key = settings.EMBEDDING_API_KEY  # Shares DashScope key with embedding
+
+    def rerank(
+        self,
+        query: str,
+        candidates: List,
+        top_k: int = 10,
+        threshold: float = 0.2,
+    ) -> List[RerankResult]:
+        if not candidates:
+            return []
+
+        documents = []
+        for c in candidates:
+            content = getattr(c, 'content', '') or getattr(c, 'chunk_content', '')
+            documents.append(content[:3000])  # DashScope limit
+
+        try:
+            import dashscope
+            from http import HTTPStatus
+            resp = dashscope.TextReRank.call(
+                api_key=self._api_key,
+                model=self.model_name,
+                query=query,
+                documents=documents,
+                top_n=min(top_k, len(documents)),
+                return_documents=True,
+            )
+            if resp.status_code != HTTPStatus.OK:
+                logger.error("Qwen Rerank API error: %s", resp.message)
+                return _fallback_rerank(candidates, top_k)
+
+            results = []
+            for item in resp.output.results:
+                idx = item["index"]
+                score = float(item["relevance_score"])
+                candidate = candidates[idx]
+                results.append(RerankResult(
+                    chunk_id=getattr(candidate, 'chunk_id', ''),
+                    content=documents[idx],
+                    original_score=getattr(candidate, 'rrf_score', 0.0) or getattr(candidate, 'score', 0.0),
+                    rerank_score=score,
+                    kb_id=getattr(candidate, 'kb_id', ''),
+                    doc_id=getattr(candidate, 'doc_id', ''),
+                ))
+
+            logger.info("Qwen Rerank: %d candidates -> %d results", len(candidates), len(results))
+            return results
+
+        except ImportError:
+            logger.warning("dashscope not installed, falling back to NoOp")
+            return _fallback_rerank(candidates, top_k)
+        except Exception as e:
+            logger.error("Qwen Rerank failed: %s", e)
+            return _fallback_rerank(candidates, top_k)
+
+
 def create_reranker(provider: str = None) -> BaseReranker:
-    """
-    工厂函数：根据配置创建重排序器
-
-    Args:
-        provider: 重排序模型类型 (local / cohere / none)
-
-    Returns:
-        重排序器实例
-    """
+    """Factory: create reranker from config."""
     provider = provider or settings.RERANK_PROVIDER
 
     if provider == "local":
         return LocalCrossEncoderReranker()
+    elif provider == "qwen":
+        return QwenReranker()
     elif provider == "cohere":
-        # TODO: 实现 Cohere Rerank API 集成
         logger.warning("Cohere Rerank not implemented yet, falling back to NoOp")
         return NoOpReranker()
-    elif provider == "none":
+    elif provider == "noop" or provider == "none":
         return NoOpReranker()
     else:
-        logger.warning(f"Unknown rerank provider: {provider}, using NoOp")
+        logger.warning("Unknown rerank provider: %s, using NoOp", provider)
         return NoOpReranker()
