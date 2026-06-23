@@ -61,6 +61,7 @@ class Chunk:
     content: str                       # 文本内容
     chunk_index: int                   # 序号
     chunk_type: str = "text"           # text / parent / child / faq
+    chunk_id: str = ""                 # 唯一标识（后分配）
     parent_chunk_id: Optional[str] = None  # 父块 ID（子块用）
     breadcrumb: Optional[str] = None       # 章节路径（如 "# 概述 > ## 细节"）
     start_at: int = 0                  # 在原文中的起始位置

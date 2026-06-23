@@ -6,11 +6,18 @@
 - POST /chat/stream: SSE 流式问答
 """
 
+import json
+import asyncio
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from app.graph.rag_pipeline import invoke_rag_pipeline  # 非流式
+from app.core.config import settings
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
@@ -50,39 +57,51 @@ class ChatResponse(BaseModel):
     search_info: dict = Field(default_factory=dict)
 
 
+# ─── LLM 实例 ───
+def _get_stream_llm():
+    """获取流式 LLM 实例"""
+    return ChatOpenAI(
+        model=settings.LLM_MODEL,
+        api_key=settings.LLM_API_KEY,
+        base_url=settings.LLM_BASE_URL,
+        temperature=settings.LLM_TEMPERATURE,
+        max_tokens=settings.LLM_MAX_TOKENS,
+        streaming=True,
+    )
+
+
 # ─── API 端点 ───
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    知识库问答接口
+    知识库问答接口（非流式）
 
     完整流程：
     Query Understanding → Hybrid Search → Dynamic RRF →
     Rerank → Context Merge → Memory Compress → LLM Generate
-
-    Args:
-        request: 问答请求参数
-
-    Returns:
-        ChatResponse: 回答 + 引用 + Token 统计
     """
-    logger.info(f"Chat request: query='{request.query[:80]}...', kb_ids={request.kb_ids}")
+    logger.info(f"Chat: query='{request.query[:80]}...', kb_ids={request.kb_ids}")
 
-    # ── 骨架实现：返回占位响应 ──
-    # 后续步骤会将 LangGraph rag_pipeline 集成到此端点
+    result = invoke_rag_pipeline(
+        query=request.query,
+        kb_ids=request.kb_ids,
+        session_id=request.session_id or "",
+    )
+
     return ChatResponse(
-        answer=f"收到您的问题：「{request.query}」\n\n"
-               f"（KnowFlow RAG Pipeline 正在建设中，将在后续版本提供完整检索与生成能力）",
-        session_id=request.session_id or "new_session_placeholder",
-        knowledge_refs=[],
-        token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-        search_info={
-            "rrf_weights": {"vector": 0.7, "keyword": 0.3},
-            "vector_hits": 0,
-            "keyword_hits": 0,
-            "reranked_count": 0,
-        },
+        answer=result["answer"],
+        session_id=request.session_id or "default",
+        knowledge_refs=[
+            KnowledgeRef(
+                chunk_id=r.get("chunk_id", ""),
+                content_preview=r.get("content_preview", "")[:200],
+                score=r.get("score", 0.0),
+            )
+            for r in result.get("knowledge_refs", [])
+        ],
+        token_usage=result.get("token_usage", {}),
+        search_info=result.get("search_info", {}),
     )
 
 
@@ -92,25 +111,105 @@ async def chat_stream(request: ChatRequest):
     SSE 流式问答接口
 
     使用 Server-Sent Events 逐步返回 LLM 生成的 Token。
-    前端可实时展示回答内容。
-
-    响应格式: text/event-stream
+    先执行检索→RRF→Rerank→合并，然后用流式 LLM 生成回答。
     """
-    logger.info(f"Chat stream request: query='{request.query[:80]}...'")
+    logger.info(f"Chat stream: query='{request.query[:80]}...'")
 
     async def event_generator():
-        import json
-        # 模拟流式输出（后续接入 LangGraph rag_pipeline.stream()）
-        demo_answer = (
-            f"正在为您处理：「{request.query}」...\n\n"
-            f"将搜索知识库: {request.kb_ids or '全部'}\n"
-            f"使用动态 RRF 融合检索 + Cross-Encoder Rerank\n\n"
-            f"（完整流式输出将在后续版本实现）"
-        )
-        for char in demo_answer:
-            yield f"data: {json.dumps({'token': char})}\n\n"
-            import asyncio
-            await asyncio.sleep(0.02)
+        query = request.query.strip()
+        kb_ids = request.kb_ids
+
+        # Step 1: 执行检索（非流式部分）
+        search_info = {"rrf_weights": {}, "vector_hits": 0, "keyword_hits": 0}
+        context_text = ""
+
+        try:
+            # 先跑检索管线（非 LLM 部分）
+            from app.graph.rag_pipeline import _get_hybrid_search, _get_dynamic_rrf, _get_dedup, _get_reranker, _get_merger
+            from app.memory.consolidator import MemoryConsolidator
+
+            rewritten = query
+            try:
+                llm = _get_stream_llm()
+                resp = llm.invoke([
+                    SystemMessage(content="将用户查询改写为更完整的检索查询，只输出改写结果，不加解释。"),
+                    HumanMessage(content=query),
+                ])
+                if resp.content:
+                    rewritten = resp.content.strip()
+            except Exception:
+                pass
+
+            # 混合检索
+            orchestrator = _get_hybrid_search()
+            hr = orchestrator.search(query=rewritten, kb_ids=kb_ids if kb_ids else None)
+            search_info["vector_hits"] = len(hr.vector_results)
+            search_info["keyword_hits"] = len(hr.keyword_results)
+
+            # RRF 融合
+            if hr.vector_results or hr.keyword_results:
+                rrf = _get_dynamic_rrf()
+                fused = rrf.fuse(rewritten, hr.vector_results, hr.keyword_results)
+                dedup = _get_dedup()
+                fused, _ = dedup.deduplicate(fused)
+                search_info["rrf_weights"] = {
+                    "vector": rrf.weight_calc.compute(rewritten, hr.vector_results, hr.keyword_results).vector,
+                    "keyword": rrf.weight_calc.compute(rewritten, hr.vector_results, hr.keyword_results).keyword,
+                }
+
+                # Rerank
+                if len(fused) > 3:
+                    try:
+                        reranker = _get_reranker()
+                        fused = reranker.rerank(query=rewritten, candidates=fused, top_k=settings.RERANK_TOP_K)
+                    except Exception:
+                        fused = fused[:settings.RERANK_TOP_K]
+
+                # 合并上下文
+                merger = _get_merger()
+                merged = merger.merge(fused, top_k=settings.RERANK_TOP_K)
+                context_text = merger.format_for_llm(merged)
+
+                yield f"data: {json.dumps({'type': 'search_info', 'data': search_info}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'search_info', 'data': search_info}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.warning(f"Search phase error (continuing without context): {e}")
+            yield f"data: {json.dumps({'type': 'warning', 'data': f'检索阶段出错，将直接回答: {str(e)[:100]}'})}\n\n"
+
+        # Step 2: LLM 流式生成
+        try:
+            stream_llm = _get_stream_llm()
+            messages = []
+
+            if context_text:
+                system_prompt = (
+                    "你是一个专业的企业知识库问答助手。请根据参考文档回答用户问题。\n"
+                    "规则：优先基于文档，标注来源编号 [1][2] 等。文档无相关信息请明确说明。\n"
+                )
+                user_prompt = f"参考文档：\n\n{context_text}\n\n---\n用户问题：{query}\n\n请回答："
+            else:
+                system_prompt = "你是一个有帮助的企业知识库助手。请友好简洁地回答用户。"
+                user_prompt = query
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+
+            full_answer = ""
+            async for chunk in stream_llm.astream(messages):
+                if chunk.content:
+                    full_answer += chunk.content
+                    yield f"data: {json.dumps({'type': 'token', 'data': chunk.content}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.01)
+
+            yield f"data: {json.dumps({'type': 'done', 'data': {'full_answer': full_answer, 'search_info': search_info}}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"LLM stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'data': str(e)[:300]})}\n\n"
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

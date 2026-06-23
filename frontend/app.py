@@ -132,11 +132,71 @@ if query:
     with st.chat_message("user"):
         st.markdown(query)
 
-    # 模拟助手回复（后续步骤接入真实 API）
+    # 调用 KnowFlow RAG API
     with st.chat_message("assistant"):
-        with st.spinner("🔍 正在检索知识库..."):
-            import time
-            time.sleep(0.5)  # 模拟延迟
-        response = f"收到您的问题：「{query}」\n\n> ⚠️ 后端 API 尚未连接（将在后续步骤实现）\n\n当前项目骨架已搭建完成：\n- ✅ FastAPI 后端就绪\n- ✅ Streamlit 前端就绪\n- ⏳ Milvus 集成 (Step 4)\n- ⏳ 动态 RRF 融合 (Step 5)"
-        st.markdown(response)
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        response_placeholder = st.empty()
+        full_response = ""
+
+        import httpx
+        import os
+
+        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        api_url = f"{backend_url}/api/v1/chat/stream"
+
+        try:
+            with st.spinner("🔍 正在检索知识库..."):
+                with httpx.stream(
+                    "POST",
+                    api_url,
+                    json={
+                        "query": query,
+                        "kb_ids": [],
+                        "stream": True,
+                        "top_k": 10,
+                    },
+                    timeout=60.0,
+                ) as resp:
+                    if resp.status_code != 200:
+                        full_response = f"❌ API 错误 ({resp.status_code}): 请确认后端已启动"
+                        response_placeholder.markdown(full_response)
+                    else:
+                        import json
+                        search_info = {}
+                        buffer = ""
+                        for line in resp.iter_lines():
+                            if line.startswith("data: "):
+                                data_str = line[6:]
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    data = json.loads(data_str)
+                                    msg_type = data.get("type", "")
+                                    if msg_type == "token":
+                                        buffer += data.get("data", "")
+                                        response_placeholder.markdown(buffer + "▌")
+                                    elif msg_type == "search_info":
+                                        search_info = data.get("data", {})
+                                except json.JSONDecodeError:
+                                    pass
+
+                        full_response = buffer or "（未收到回答）"
+
+                        # 展示检索信息
+                        if search_info:
+                            v_hits = search_info.get("vector_hits", 0)
+                            k_hits = search_info.get("keyword_hits", 0)
+                            weights = search_info.get("rrf_weights", {})
+                            caption = f"🔍 向量命中 {v_hits} · 关键词命中 {k_hits} · RRF权重 {weights.get('vector', 0):.2f}/{weights.get('keyword', 0):.2f}"
+                            st.caption(caption)
+
+        except httpx.ConnectError:
+            full_response = "❌ 无法连接后端服务。请确认 `uvicorn main:app --reload` 已在 http://localhost:8000 启动。"
+            response_placeholder.markdown(full_response)
+        except Exception as e:
+            full_response = f"❌ 请求出错: {str(e)[:200]}"
+            response_placeholder.markdown(full_response)
+
+        if full_response:
+            response_placeholder.markdown(full_response)
+
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
