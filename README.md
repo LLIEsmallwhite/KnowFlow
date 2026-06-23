@@ -148,6 +148,80 @@ KnowFlow/
 
 Chunk ID → 内容 SHA256 签名 → Token 重叠系数（≥85% 时合并）
 
+## 📊 实施进度
+
+| 步骤 | 内容 | 核心文件 | 状态 |
+|------|------|---------|------|
+| Step 1 | 项目骨架 | `main.py`, `docker-compose.yml`, `app.py` | ✅ |
+| Step 2 | 数据模型 | `models/*.py`, `core/config.py`, `migrations/` | ✅ |
+| Step 3 | 文档处理 | `utils/chunking.py`, `utils/document_loaders.py` | ✅ |
+| Step 4 | 检索器 | `retrieval/milvus_client.py`, `dense_retriever.py`, `bm25_retriever.py` | ✅ |
+| Step 5 | 动态RRF | `retrieval/dynamic_rrf.py`, `retrieval/dedup.py` | ✅ |
+| Step 6 | Rerank | `retrieval/reranker.py`, `retrieval/context_merge.py` | ✅ |
+| Step 7 | 记忆压缩 | `memory/consolidator.py`, `memory/token_estimator.py` | ✅ |
+| Step 8 | LangGraph | `graph/rag_pipeline.py`, `graph/agent_graph.py` | ✅ |
+| Step 9 | API层 | `api/chat.py`, `api/knowledge_base.py` | ✅ |
+| Step 11 | Langfuse | `observability/langfuse_client.py` | ✅ |
+| Step 12 | 部署 | `docker-compose.yml`, `Dockerfile` × 2 | ✅ |
+
+## 📁 完整文件清单
+
+```
+KnowFlow/
+├── backend/
+│   ├── app/
+│   │   ├── api/                          # FastAPI 路由
+│   │   │   ├── chat.py                   # 对话接口 (SSE 流式)
+│   │   │   └── knowledge_base.py         # 知识库 CRUD
+│   │   ├── core/
+│   │   │   ├── config.py                 # Pydantic Settings 全局配置
+│   │   │   ├── database.py               # SQLAlchemy async engine
+│   │   │   └── dependencies.py           # FastAPI 依赖注入
+│   │   ├── models/                       # SQLAlchemy 数据模型
+│   │   │   ├── user.py                   # 用户模型
+│   │   │   ├── knowledge_base.py         # 知识库模型
+│   │   │   ├── document.py               # 文档模型
+│   │   │   ├── chunk.py                  # 文本片段模型
+│   │   │   ├── session.py                # 会话模型
+│   │   │   └── message.py                # 消息模型
+│   │   ├── retrieval/                    # ⭐ 检索核心
+│   │   │   ├── milvus_client.py          # Milvus 连接 & Collection 管理
+│   │   │   ├── dense_retriever.py        # Dense Vector 检索
+│   │   │   ├── bm25_retriever.py         # BM25 关键词检索 (jieba)
+│   │   │   ├── hybrid_search.py          # 混合检索编排器（并行）
+│   │   │   ├── dynamic_rrf.py            # ⭐ 动态权重 RRF 融合
+│   │   │   ├── dedup.py                  # 三级去重
+│   │   │   ├── reranker.py               # Cross-Encoder Rerank
+│   │   │   └── context_merge.py          # 上下文合并
+│   │   ├── memory/                       # 记忆管理
+│   │   │   ├── consolidator.py           # LLM 记忆压缩器
+│   │   │   └── token_estimator.py        # tiktoken Token 估算
+│   │   ├── graph/                        # LangGraph 编排
+│   │   │   ├── states.py                 # State 类型定义
+│   │   │   ├── rag_pipeline.py           # RAG 7 节点 Pipeline
+│   │   │   └── agent_graph.py            # Agent ReAct Graph
+│   │   ├── utils/                        # 工具
+│   │   │   ├── chunking.py               # 自适应三层分块
+│   │   │   ├── text_processing.py        # 文本归一化/签名
+│   │   │   └── document_loaders.py       # PDF/Word/MD/HTML 加载器
+│   │   ├── services/
+│   │   │   └── doc_service.py            # 文档处理服务
+│   │   └── observability/
+│   │       └── langfuse_client.py        # Langfuse 追踪
+│   ├── migrations/                       # Alembic 迁移
+│   ├── tasks/                            # Celery 异步任务
+│   ├── requirements.txt
+│   └── main.py                           # FastAPI 入口
+├── frontend/
+│   ├── pages/                            # Streamlit 页面
+│   ├── components/                       # UI 组件
+│   ├── app.py                            # Streamlit 入口
+│   └── requirements.txt
+├── docker-compose.yml                    # 完整容器编排
+├── .env.example                          # 环境变量模板
+└── README.md
+```
+
 ## 📄 License
 
 MIT License
