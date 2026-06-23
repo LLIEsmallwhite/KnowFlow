@@ -229,5 +229,5 @@ MIT License
 ---
 
 <p align="center">
-  Made with ❤️ by KnowFlow Team
+  Built with ❤️ by <a href="https://github.com/LLIEsmallwhite">LLIEsmallwhite</a>
 </p>
