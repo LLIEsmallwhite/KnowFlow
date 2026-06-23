@@ -101,7 +101,7 @@ with st.sidebar:
     st.markdown("### ⚙️ 设置")
     st.toggle("🌐 联网搜索", value=False)
     st.toggle("🧠 记忆模式", value=True)
-    st.selectbox("模型", ["gpt-4o", "gpt-4o-mini", "deepseek-chat"])
+    st.selectbox("模型", ["deepseek-chat", "deepseek-v4-pro", "qwen-plus"])
 
 # ─── 主区域 ───
 st.markdown('<p class="main-title">💬 智能问答</p>', unsafe_allow_html=True)

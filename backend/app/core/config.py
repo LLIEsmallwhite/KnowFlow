@@ -79,26 +79,26 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
 
     # ─── LLM 配置 ───
-    LLM_PROVIDER: Literal["openai", "azure", "ollama", "deepseek"] = "openai"
-    LLM_MODEL: str = "gpt-4o"
+    LLM_PROVIDER: str = "deepseek"
+    LLM_MODEL: str = "deepseek-chat"
     LLM_API_KEY: str = ""
-    LLM_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_BASE_URL: str = "https://api.deepseek.com"
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096
 
-    # 廉价模型 — 用于记忆压缩等非核心任务
-    SUMMARY_LLM_MODEL: str = "gpt-4o-mini"
+    # 记忆压缩模型（轻量任务用便宜模型）
+    SUMMARY_LLM_MODEL: str = "deepseek-chat"
     SUMMARY_LLM_TEMPERATURE: float = 0.3
 
-    # ─── Embedding 模型 ───
+    # ─── Embedding 模型（阿里云百炼 Qwen） ───
     EMBEDDING_PROVIDER: str = "openai"
-    EMBEDDING_MODEL: str = "text-embedding-3-large"
+    EMBEDDING_MODEL: str = "text-embedding-v3"
     EMBEDDING_API_KEY: str = ""
-    EMBEDDING_BASE_URL: str = "https://api.openai.com/v1"
+    EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     EMBEDDING_DIMENSION: int = 1024
 
-    # ─── Rerank 模型 ───
-    RERANK_PROVIDER: Literal["local", "cohere"] = "local"
+    # ─── Rerank 模型（本地 Cross-Encoder，无需 API） ───
+    RERANK_PROVIDER: str = "local"
     RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANK_API_KEY: str = ""
     RERANK_BASE_URL: str = ""
