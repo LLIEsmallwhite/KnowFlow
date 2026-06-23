@@ -16,7 +16,7 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
+router = APIRouter(prefix="/api/v1/auth", tags=["用户认证"])
 
 
 class RegisterRequest(BaseModel):

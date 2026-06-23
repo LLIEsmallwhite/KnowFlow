@@ -30,7 +30,7 @@ from app.retrieval import shared_bm25 as _bm25
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/knowledge-bases", tags=["Knowledge Base"])
+router = APIRouter(prefix="/api/v1/knowledge-bases", tags=["知识库管理"])
 
 # ─── Global retrievers ───
 _dense: Optional[DenseRetriever] = None
@@ -400,6 +400,43 @@ async def delete_document(
 
 # ─── Debug ───
 
+@router.get("/debug/chunks-status")
+async def chunks_status(kb_id: str, db: AsyncSession = Depends(get_db)):
+    """Show chunk indexing status: which docs have vectors, which are BM25-only."""
+    from app.services.chunk_crud import ChunkCRUD
+    ccrud = ChunkCRUD()
+    all_chunks = await ccrud.get_by_kb(db, kb_id)
+
+    by_doc = {}
+    for c in all_chunks:
+        name = getattr(c, 'extra_metadata', {}) or {}
+        doc = by_doc.setdefault(c.document_id, {"total": 0, "indexable": 0, "indexed": 0})
+        doc["total"] += 1
+        if c.chunk_type in ("child", "text"):
+            doc["indexable"] += 1
+            if c.is_indexed:
+                doc["indexed"] += 1
+
+    # Fetch document titles
+    docs = await doc_crud.list_by_kb(db, kb_id)
+    doc_names = {d.id: d.title for d in docs}
+
+    return {
+        "kb_id": kb_id,
+        "documents": [
+            {
+                "doc_id": did,
+                "title": doc_names.get(did, did[:8]),
+                "total_chunks": s["total"],
+                "indexable": s["indexable"],
+                "vectorized": s["indexed"],
+                "has_vectors": s["indexed"] > 0,
+            }
+            for did, s in by_doc.items()
+        ]
+    }
+
+
 @router.get("/debug/bm25")
 async def debug_bm25():
     """Debug endpoint: inspect BM25 index state."""
@@ -428,7 +465,7 @@ async def revectorize_kb(kb_id: str, db: AsyncSession = Depends(get_db)):
     milvus._ensure_partition(kb_id)
 
     contents = [c["content"] for c in idx_chunks]
-    batch_size = 20
+    batch_size = 10  # DashScope max batch size
     total = 0
     for i in range(0, len(contents), batch_size):
         batch_contents = contents[i:i + batch_size]

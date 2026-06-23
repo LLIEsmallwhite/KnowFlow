@@ -28,12 +28,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BM25Result:
-    """BM25 检索结果"""
+    """BM25 search result with document metadata."""
     chunk_id: str
     content: str
     score: float
     kb_id: str = ""
     doc_id: str = ""
+    doc_title: str = ""
+    doc_filename: str = ""
 
 
 class BM25Retriever:
@@ -167,6 +169,8 @@ class BM25Retriever:
                     score=score,
                     kb_id=kb_id,
                     doc_id=chunk.get("doc_id", ""),
+                    doc_title=chunk.get("doc_title", ""),
+                    doc_filename=chunk.get("doc_filename", ""),
                 ))
 
             logger.debug(
@@ -212,12 +216,14 @@ def build_bm25_index_from_db(
     if retriever is None:
         retriever = BM25Retriever()
 
-    # 转换为 BM25Retriever 期望的格式
+    # Convert to BM25Retriever expected format with doc metadata
     formatted = [
         {
             "chunk_id": c.get("id", c.get("chunk_id", "")),
             "content": c.get("content", ""),
             "doc_id": c.get("document_id", c.get("doc_id", "")),
+            "doc_title": c.get("doc_title", ""),
+            "doc_filename": c.get("doc_filename", ""),
         }
         for c in chunks
     ]

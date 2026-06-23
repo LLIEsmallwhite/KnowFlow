@@ -94,10 +94,25 @@ class ChunkCRUD:
         kb_id: str,
         chunk_types: Optional[List[str]] = None,
     ) -> List[Dict]:
-        """Return chunks as dicts suitable for BM25/Milvus indexing."""
+        """Return chunks as dicts suitable for BM25/Milvus indexing, with doc metadata."""
         if chunk_types is None:
             chunk_types = ["child", "text"]
         chunks = await self.get_by_kb(db, kb_id, chunk_types=chunk_types)
+
+        # Batch-fetch document titles for all chunks
+        from app.models.document import Document
+        from sqlalchemy import select as sql_select
+        doc_ids = list(set(c.document_id for c in chunks))
+        doc_map = {}
+        if doc_ids:
+            result = await db.execute(
+                sql_select(Document.id, Document.title, Document.file_name).where(
+                    Document.id.in_(doc_ids)
+                )
+            )
+            for row in result:
+                doc_map[row[0]] = (row[1] or "", row[2] or "")
+
         return [
             {
                 "id": c.id,
@@ -106,6 +121,8 @@ class ChunkCRUD:
                 "chunk_index": c.chunk_index,
                 "chunk_type": c.chunk_type,
                 "document_id": c.document_id,
+                "doc_title": doc_map.get(c.document_id, ("", ""))[0],
+                "doc_filename": doc_map.get(c.document_id, ("", ""))[1],
                 "metadata": c.extra_metadata or {},
             }
             for c in chunks

@@ -9,11 +9,13 @@ import streamlit as st
 
 # ─── Page config (MUST be first) ───
 st.set_page_config(
-    page_title="KnowFlow — RAG 知识库问答助手",
+    page_title="💬 智能问答",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
 
 # ─── Custom CSS ───
 st.markdown("""
@@ -97,6 +99,7 @@ if query:
         response_placeholder = st.empty()
         full_response = ""
         search_info = {}
+        knowledge_refs = []
 
         try:
             with st.spinner("🔍 正在检索知识库..."):
@@ -114,6 +117,8 @@ if query:
                         response_placeholder.markdown(full_response + "▌")
                     elif etype == "search_info":
                         search_info = event.get("data", {})
+                    elif etype == "knowledge_refs":
+                        knowledge_refs = event.get("data", [])
                     elif etype == "done":
                         done_data = event.get("data", {})
                         if not full_response:
@@ -141,5 +146,10 @@ if query:
         if search_info:
             from components.search_viz import render_search_info
             render_search_info(search_info)
+
+        # Show knowledge references grouped by document
+        if knowledge_refs:
+            from components.search_viz import render_knowledge_refs
+            render_knowledge_refs(knowledge_refs)
 
     st.session_state.messages.append({"role": "assistant", "content": full_response})

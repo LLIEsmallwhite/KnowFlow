@@ -40,12 +40,14 @@ VECTOR_DIM = settings.EMBEDDING_DIMENSION
 
 @dataclass
 class SearchResult:
-    """单条检索结果"""
+    """Search result with document metadata."""
     chunk_id: str
     content: str
     score: float
     kb_id: str = ""
     doc_id: str = ""
+    doc_title: str = ""
+    doc_filename: str = ""
 
 
 class MilvusClient:

@@ -27,7 +27,7 @@ from app.services.message_crud import message_crud
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
+router = APIRouter(prefix="/api/v1/chat", tags=["开始聊天"])
 
 # Default user ID (until auth is implemented)
 DEFAULT_USER_ID = "default-user"
@@ -234,15 +234,22 @@ async def chat_stream(
                 merged = merger.merge(fused, top_k=settings.RERANK_TOP_K)
                 context_text = merger.format_for_llm(merged)
 
+                # Build a lookup from chunk_id to fused RRFChunk for doc metadata
+                fused_map = {getattr(f, 'chunk_id', ''): f for f in fused}
                 for ctx in merged:
                     for cid in ctx.chunk_ids[:3]:
+                        fchunk = fused_map.get(cid)
                         knowledge_refs.append({
                             "chunk_id": cid,
                             "content_preview": ctx.content[:200],
                             "score": ctx.relevance_score,
+                            "doc_title": getattr(fchunk, 'doc_title', '') if fchunk else '',
+                            "doc_filename": getattr(fchunk, 'doc_filename', '') if fchunk else '',
+                            "full_content": ctx.content,
                         })
 
                 yield f"data: {json.dumps({'type': 'search_info', 'data': search_info}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'knowledge_refs', 'data': knowledge_refs}, ensure_ascii=False)}\n\n"
             else:
                 yield f"data: {json.dumps({'type': 'search_info', 'data': search_info}, ensure_ascii=False)}\n\n"
         except Exception as e:

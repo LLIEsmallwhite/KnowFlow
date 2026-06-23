@@ -20,7 +20,7 @@ from app.services.message_crud import message_crud
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/agent", tags=["Agent"])
+router = APIRouter(prefix="/api/v1/agent", tags=["智能Agent"])
 DEFAULT_USER_ID = "default-user"
 
 

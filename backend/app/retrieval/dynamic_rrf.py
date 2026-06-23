@@ -45,16 +45,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RRFChunk:
-    """RRF 融合后的单个 Chunk"""
+    """RRF-fused chunk with document metadata."""
     chunk_id: str
     content: str
     rrf_score: float
-    vector_rank: int = -1           # 在向量检索中的排名（1-indexed，-1 表示未命中）
-    keyword_rank: int = -1          # 在关键词检索中的排名
-    source: str = ""                 # "vector" / "keyword" / "both"
+    vector_rank: int = -1
+    keyword_rank: int = -1
+    source: str = ""
     kb_id: str = ""
     doc_id: str = ""
-    # 保留原始分数用于调试
+    doc_title: str = ""
+    doc_filename: str = ""
     original_vector_score: float = 0.0
     original_keyword_score: float = 0.0
 
@@ -324,14 +325,12 @@ class DynamicRRF:
         chunk_map: Dict[str, RRFChunk] = {}
         for r in vector_results:
             chunk_map[r.chunk_id] = RRFChunk(
-                chunk_id=r.chunk_id,
-                content=r.content,
-                rrf_score=0.0,
+                chunk_id=r.chunk_id, content=r.content, rrf_score=0.0,
                 vector_rank=vector_ranks.get(r.chunk_id, -1),
-                keyword_rank=-1,
-                source="vector",
-                kb_id=r.kb_id,
-                doc_id=r.doc_id,
+                keyword_rank=-1, source="vector",
+                kb_id=r.kb_id, doc_id=r.doc_id,
+                doc_title=getattr(r, 'doc_title', ''),
+                doc_filename=getattr(r, 'doc_filename', ''),
                 original_vector_score=r.score,
             )
         for r in keyword_results:
@@ -341,14 +340,13 @@ class DynamicRRF:
                 chunk_map[r.chunk_id].original_keyword_score = r.score
             else:
                 chunk_map[r.chunk_id] = RRFChunk(
-                    chunk_id=r.chunk_id,
-                    content=r.content,
-                    rrf_score=0.0,
+                    chunk_id=r.chunk_id, content=r.content, rrf_score=0.0,
                     vector_rank=-1,
                     keyword_rank=keyword_ranks.get(r.chunk_id, -1),
                     source="keyword",
-                    kb_id=r.kb_id,
-                    doc_id=r.doc_id,
+                    kb_id=r.kb_id, doc_id=r.doc_id,
+                    doc_title=getattr(r, 'doc_title', ''),
+                    doc_filename=getattr(r, 'doc_filename', ''),
                     original_keyword_score=r.score,
                 )
 

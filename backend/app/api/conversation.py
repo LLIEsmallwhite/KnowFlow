@@ -17,7 +17,7 @@ from app.services.message_crud import message_crud
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/conversations", tags=["Conversations"])
+router = APIRouter(prefix="/api/v1/conversations", tags=["历史对话"])
 
 # Default user ID (until auth is implemented)
 DEFAULT_USER_ID = "default-user"
