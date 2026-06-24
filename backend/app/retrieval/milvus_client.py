@@ -324,7 +324,7 @@ class MilvusClient:
                     CONTENT_FIELD,
                 ],
                 search_params=search_params,
-                partition_names=kb_ids if kb_ids else None,
+                partition_names=[p for p in kb_ids if self._client.has_partition(self._collection_name, p)] if kb_ids else None,
                 anns_field=VECTOR_FIELD,
             )
 

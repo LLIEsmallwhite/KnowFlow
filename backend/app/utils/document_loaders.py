@@ -9,6 +9,8 @@ import os
 from typing import List, Optional
 from pathlib import Path
 
+from app.core.config import settings
+
 
 class Document:
     """加载后的文档对象"""
@@ -306,6 +308,68 @@ class PPTLoader(BaseLoader):
 
 # ─── 加载器工厂 ───
 
+class ImageLoader(BaseLoader):
+    """Image OCR loader via DashScope OmniParser / Qwen-VL-OCR."""
+
+    def load(self, file_path: str) -> Document:
+        import base64
+        try:
+            import dashscope
+            from http import HTTPStatus
+        except ImportError:
+            raise ImportError("dashscope not installed. Run: pip install dashscope")
+
+        with open(file_path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+
+        messages = [{
+            "role": "user",
+            "content": [
+                {"image": f"data:image/png;base64,{image_data}"},
+                {"text": "请提取图片中的所有文字内容，保持原有格式，不要添加额外说明。"},
+            ],
+        }]
+
+        resp = dashscope.MultiModalConversation.call(
+            model="qwen-vl-max",
+            messages=messages,
+            api_key=settings.EMBEDDING_API_KEY,
+        )
+        if resp.status_code != HTTPStatus.OK:
+            raise RuntimeError(f"OCR API error: {resp.code} {resp.message}")
+
+        # Parse OCR response — format varies by model version
+        output = resp.output
+        if output and output.choices:
+            content = output.choices[0].message.content
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                texts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        texts.append(part.get("text", ""))
+                    elif hasattr(part, "text"):
+                        texts.append(part.text)
+                text = "\n".join(t for t in texts if t)
+            else:
+                text = str(content)
+        else:
+            text = ""
+
+        if not text.strip():
+            raise RuntimeError("OCR returned empty text — image may have no text content")
+
+        return Document(
+            content=text,
+            metadata={
+                "title": Path(file_path).stem,
+                "file_type": "image",
+                "ocr_model": "qwen-vl-ocr",
+            },
+        )
+
+
 LOADER_MAP = {
     "pdf": PDFLoader,
     "docx": DocxLoader,
@@ -321,6 +385,9 @@ LOADER_MAP = {
     "xls": ExcelLoader,
     "pptx": PPTLoader,
     "ppt": PPTLoader,
+    "png": ImageLoader,
+    "jpg": ImageLoader,
+    "jpeg": ImageLoader,
 }
 
 

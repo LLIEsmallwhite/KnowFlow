@@ -27,9 +27,11 @@ async def get_current_user(
         result = await db.execute(select(User).where(User.username == "dev").limit(1))
         user = result.scalar_one_or_none()
         if user is None:
+            from app.core.auth import hash_password
             user = User(
                 username="dev", email="dev@knowflow.local",
-                hashed_password="", role="admin", clearance_level=999,
+                hashed_password=hash_password("admin123"),
+                role="admin", clearance_level=999,
                 departments=["engineering", "product", "hr"],
                 is_superuser=True,
             )

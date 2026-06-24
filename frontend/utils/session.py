@@ -1,16 +1,34 @@
 """
-Session State Manager for Streamlit
-
-Initializes and manages all session state variables across pages.
-Call init_session_state() at the top of app.py.
+Session State Manager for Streamlit — persists auth across refreshes.
 """
 
+import os
+import json
 import streamlit as st
 from utils.api import KnowFlowAPI
 
+TOKEN_FILE = os.path.join(os.path.dirname(__file__), "..", ".streamlit", "auth.json")
+
+
+def _load_auth():
+    try:
+        with open(TOKEN_FILE) as f:
+            d = json.load(f)
+            return d.get("token", ""), d.get("username", "")
+    except Exception:
+        return "", ""
+
+
+def _save_auth(token: str, username: str):
+    try:
+        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+        with open(TOKEN_FILE, "w") as f:
+            json.dump({"token": token, "username": username}, f)
+    except Exception:
+        pass
+
 
 def init_session_state():
-    """Initialize all session state defaults if not already set."""
     defaults = {
         "api": None,
         "messages": [],
@@ -22,19 +40,35 @@ def init_session_state():
         "temperature": 0.1,
         "sidebar_kb_list": [],
         "kbs_loaded": False,
-        # Auth
-        "logged_in": False,
-        "auth_token": None,
-        "username": "",
     }
 
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
 
-    # Init API client with stored token
+    # Restore persisted auth token
+    if "auth_token" not in st.session_state:
+        token, username = _load_auth()
+        st.session_state.auth_token = token
+        st.session_state.username = username
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = bool(st.session_state.auth_token)
+    if "username" not in st.session_state:
+        st.session_state.username = ""
+
+    # Always init API client
     if st.session_state.api is None:
         st.session_state.api = KnowFlowAPI(token=st.session_state.auth_token)
+
+    # Validate persisted token
+    if st.session_state.logged_in:
+        try:
+            st.session_state.api.health()
+        except Exception:
+            st.session_state.logged_in = False
+            st.session_state.auth_token = None
+            _save_token("")
+            st.session_state.api = KnowFlowAPI()
 
 
 def get_api() -> KnowFlowAPI:

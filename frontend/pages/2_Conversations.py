@@ -9,6 +9,10 @@ from utils.session import init_session_state, get_api
 
 init_session_state()
 
+if not st.session_state.get("logged_in"):
+    st.warning("请先在主页登录")
+    st.stop()
+
 st.set_page_config(page_title="对话历史", page_icon="💾", layout="wide")
 
 st.title("💾 对话历史")

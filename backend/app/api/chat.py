@@ -21,6 +21,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.dependencies import get_current_user
+from app.models.user import User
 from app.graph.rag_pipeline import invoke_rag_pipeline
 from app.services.session_crud import session_crud
 from app.services.message_crud import message_crud
@@ -28,9 +30,6 @@ from app.services.message_crud import message_crud
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["开始聊天"])
-
-# Default user ID (until auth is implemented)
-DEFAULT_USER_ID = "default-user"
 
 
 # ─── Request/Response Models ───
@@ -87,18 +86,15 @@ def _get_stream_llm():
 # ─── Helpers ───
 
 async def _ensure_session(
-    db: AsyncSession,
-    session_id: Optional[str],
-    query: str,
+    db: AsyncSession, user: User, session_id: Optional[str], query: str,
 ) -> str:
-    """Get or create a session. Returns session_id."""
+    """Get or create a session."""
     if session_id:
         session = await session_crud.get(db, session_id)
         if session:
             return session_id
-    # Create new session with query as title
     title = query[:50] + ("..." if len(query) > 50 else "")
-    session = await session_crud.create(db, user_id=DEFAULT_USER_ID, title=title)
+    session = await session_crud.create(db, user_id=user.id, title=title)
     return session.id
 
 
@@ -108,12 +104,13 @@ async def _ensure_session(
 async def chat(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Synchronous RAG Q&A with DB persistence."""
     logger.info("Chat: query='%s...', kb_ids=%s", request.query[:80], request.kb_ids)
 
     # Ensure session exists
-    session_id = await _ensure_session(db, request.session_id, request.query)
+    session_id = await _ensure_session(db, user, request.session_id, request.query)
 
     # Save user message
     await message_crud.create(db, session_id=session_id, role="user",
@@ -159,21 +156,21 @@ async def chat(
 async def chat_stream(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """SSE streaming RAG Q&A with DB persistence."""
     logger.info("Chat stream: query='%s...'", request.query[:80])
 
-    # Ensure session BEFORE generator (needs a running event loop)
     session_id = request.session_id
     if not session_id:
         title = request.query[:50] + ("..." if len(request.query) > 50 else "")
-        session = await session_crud.create(db, user_id=DEFAULT_USER_ID, title=title)
+        session = await session_crud.create(db, user_id=user.id, title=title)
         session_id = session.id
     else:
         existing = await session_crud.get(db, session_id)
         if not existing:
             title = request.query[:50] + ("..." if len(request.query) > 50 else "")
-            session = await session_crud.create(db, user_id=DEFAULT_USER_ID, title=title)
+            session = await session_crud.create(db, user_id=user.id, title=title)
             session_id = session.id
 
     # Save user message

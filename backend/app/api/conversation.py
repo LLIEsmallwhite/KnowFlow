@@ -12,15 +12,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from app.models.user import User
 from app.services.session_crud import session_crud
 from app.services.message_crud import message_crud
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/conversations", tags=["历史对话"])
-
-# Default user ID (until auth is implemented)
-DEFAULT_USER_ID = "default-user"
 
 
 # ─── Models ───
@@ -56,12 +55,12 @@ class MessageResponse(BaseModel):
 @router.get("", response_model=List[SessionResponse])
 async def list_sessions(
     db: AsyncSession = Depends(get_db),
-    skip: int = 0,
-    limit: int = 50,
+    user: User = Depends(get_current_user),
+    skip: int = 0, limit: int = 50,
 ):
     """List all conversations for the current user."""
     sessions = await session_crud.list_by_user(
-        db, DEFAULT_USER_ID, skip=skip, limit=limit
+        db, user.id, skip=skip, limit=limit
     )
     return [
         SessionResponse(
@@ -81,11 +80,12 @@ async def list_sessions(
 async def create_session(
     req: CreateSessionRequest,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Create a new conversation session."""
     session = await session_crud.create(
         db,
-        user_id=DEFAULT_USER_ID,
+        user_id=user.id,
         title=req.title,
         knowledge_base_id=req.kb_id,
         session_type=req.session_type,

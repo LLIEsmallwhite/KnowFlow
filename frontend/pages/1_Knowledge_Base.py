@@ -11,8 +11,11 @@ from utils.session import init_session_state, get_api, load_kb_list
 
 init_session_state()
 
-st.set_page_config(page_title="知识库管理", page_icon="📚", layout="wide")
+if not st.session_state.get("logged_in"):
+    st.warning("请先在主页登录")
+    st.stop()
 
+st.set_page_config(page_title="知识库管理", page_icon="📚", layout="wide")
 st.title("📚 知识库管理")
 st.caption("创建知识库、上传文档、管理索引")
 

@@ -3,7 +3,7 @@ Sidebar component for KnowFlow.
 """
 
 import streamlit as st
-from utils.session import get_api, load_kb_list, start_new_chat
+from utils.session import get_api, load_kb_list, start_new_chat, _save_auth
 from utils.api import KnowFlowAPI
 
 
@@ -28,6 +28,7 @@ def render_sidebar():
                             st.session_state.auth_token = api.token
                             st.session_state.username = result.get("username", "")
                             st.session_state.api = KnowFlowAPI(token=api.token)
+                            _save_auth(api.token, result.get("username", ""))
                             st.rerun()
                         except Exception as e:
                             st.error(f"登录失败: {e}")
@@ -42,6 +43,7 @@ def render_sidebar():
                             st.session_state.auth_token = api.token
                             st.session_state.username = result.get("username", "")
                             st.session_state.api = KnowFlowAPI(token=api.token)
+                            _save_auth(api.token, result.get("username", ""))
                             st.rerun()
                         except Exception as e:
                             st.error(f"注册失败: {e}")
@@ -56,6 +58,7 @@ def render_sidebar():
             st.session_state.auth_token = None
             st.session_state.username = ""
             st.session_state.api = KnowFlowAPI()
+            _save_auth("", "")
             st.rerun()
         st.markdown("---")
 

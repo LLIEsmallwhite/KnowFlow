@@ -6,7 +6,8 @@ Register, login, get current user.
 
 import logging
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
+from pydantic.networks import EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -64,6 +65,10 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         username=req.username,
         email=req.email,
         hashed_password=hash_password(req.password),
+        # Defaults for new RBAC fields
+        role="member",
+        clearance_level=1,
+        departments=[],
     )
     db.add(user)
     await db.flush()
