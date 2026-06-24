@@ -58,6 +58,8 @@ class KBCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     kb_type: str = Field("document", pattern="^(document|faq|wiki)$")
+    department: str = Field("_", max_length=64, description="部门: engineering/product/hr/_")
+    security_level: int = Field(1, ge=0, le=3, description="密级: 0公开 1内部 2机密 3绝密")
     chunk_size: int = Field(512, ge=100, le=4000)
     chunk_overlap: int = Field(80, ge=0, le=500)
 
@@ -122,10 +124,8 @@ async def create_knowledge_base(
 ):
     """Create a new knowledge base."""
     kb = await kb_crud.create(
-        db,
-        name=req.name,
-        description=req.description,
-        kb_type=req.kb_type,
+        db, name=req.name, description=req.description, kb_type=req.kb_type,
+        department=req.department, security_level=req.security_level,
     )
     logger.info("KB created: id=%s, name=%s", kb.id, req.name)
     return KBResponse(
@@ -251,108 +251,99 @@ async def upload_document(
         file_size=file_size,
         file_hash=file_hash,
     )
-    await doc_crud.update_status(db, doc.id, status="processing")
-
+    # Dispatch to Celery for async processing
     try:
-        # Parse and chunk
-        parsed_doc, chunks = doc_service.process_document_pipeline(
+        from tasks.document_tasks import process_document_task
+        process_document_task.delay(
+            doc_id=doc.id,
+            kb_id=kb_id,
             file_path=tmp_path,
             file_type=ext,
         )
-
-        # Build chunk records for DB
-        chunk_dicts = []
-        for i, chunk in enumerate(chunks):
-            chunk_dicts.append({
-                "document_id": doc.id,
-                "knowledge_base_id": kb_id,
-                "content": chunk.content,
-                "chunk_index": chunk.chunk_index,
-                "chunk_type": chunk.chunk_type,
-                "content_hash": chunk.metadata.get("content_hash") if chunk.metadata else None,
-                "metadata": chunk.metadata or {},
-                "parent_chunk_id": getattr(chunk, "parent_chunk_id", None),
-                "start_at": getattr(chunk, "start_at", None),
-                "end_at": getattr(chunk, "end_at", None),
-            })
-
-        # Persist chunks to DB
-        orm_chunks = await chunk_crud.bulk_create(db, chunk_dicts)
-
-        # Index into Milvus (child and text chunks only)
-        try:
-            milvus = _get_milvus()
-            milvus._ensure_partition(kb_id)
-
-            idx_chunks = [
-                {"id": c.id, "content": c.content}
-                for c in orm_chunks
-                if c.chunk_type in ("child", "text") and c.content and c.content.strip()
-            ]
-            if idx_chunks:
-                contents = [c["content"] for c in idx_chunks]
-                embeddings = _get_dense().embed_documents(contents)
-                if embeddings and len(embeddings) == len(idx_chunks):
-                    n = len(idx_chunks)
-                    kb_security = kb.security_level
-                    kb_dept = kb.department or ""
-                    milvus.insert_vectors(
-                        chunk_ids=[c["id"] for c in idx_chunks],
-                        embeddings=embeddings,
-                        contents=contents,
-                        kb_id=kb_id,
-                        security_levels=[kb_security] * n,
-                        departments=[kb_dept] * n,
-                    )
-                    # Mark as indexed
-                await chunk_crud.mark_indexed(db, [c["id"] for c in idx_chunks])
-        except Exception as e:
-            logger.warning("Milvus indexing failed (non-fatal): %s", e)
-
-        # Update BM25 index from DB
-        indexable = await chunk_crud.get_indexable(db, kb_id)
-        logger.info("Building BM25 for KB %s: %d indexable chunks", kb_id, len(indexable))
-        if indexable:
-            logger.info("Sample chunk[0]: id=%s, type=%s, preview=%s",
-                        indexable[0].get("id", "?"),
-                        indexable[0].get("chunk_type", "?"),
-                        indexable[0].get("content", "")[:100])
-        build_bm25_index_from_db(kb_id, indexable, _bm25)
-        logger.info("BM25 built: KB=%s, index_size=%d, all_indexed=%s",
-                    kb_id, _bm25.get_index_size(kb_id), _bm25.get_indexed_kbs())
-
-        # Update document status
-        await doc_crud.update_status(
-            db, doc.id,
-            status="completed",
-            chunk_count=len(chunks),
-            is_indexed=True,
-        )
-
-        # Update KB counts
-        await kb_crud.update_counts(db, kb_id, doc_delta=1, chunk_delta=len(chunks))
-
-        logger.info("Document processed: %s -> %d chunks", doc_title, len(chunks))
-        return {
-            "status": "completed",
-            "kb_id": kb_id,
-            "doc_id": doc.id,
-            "filename": file.filename,
-            "title": doc_title,
-            "chunk_count": len(chunks),
-            "content_length": len(parsed_doc.content),
-        }
-
+        logger.info("Celery task dispatched: doc=%s, kb=%s", doc.id, kb_id)
     except Exception as e:
-        logger.error("Document processing failed: %s", e, exc_info=True)
-        await doc_crud.update_status(db, doc.id, status="failed", error_message=str(e)[:500])
-        raise HTTPException(status_code=500, detail=f"文档处理失败: {str(e)[:200]}")
+        logger.warning("Celery unavailable, processing inline: %s", e)
+        # Fallback: process synchronously
+        _process_document_sync(db, doc.id, kb_id, tmp_path, ext, kb)
 
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+    return {
+        "status": "processing",
+        "kb_id": kb_id,
+        "doc_id": doc.id,
+        "filename": file.filename,
+        "title": doc_title,
+        "message": "文档已提交，正在后台处理中",
+    }
+
+
+@router.get("/{kb_id}/documents/{doc_id}/status")
+async def get_document_status(
+    kb_id: str, doc_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll document processing status."""
+    doc = await doc_crud.get(db, doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return {
+        "doc_id": doc.id,
+        "status": doc.status,
+        "error_message": doc.error_message,
+        "chunk_count": doc.chunk_count,
+        "is_indexed": doc.is_indexed,
+    }
+
+
+async def _process_document_sync(db, doc_id, kb_id, file_path, file_type, kb):
+    """Fallback sync processing when Celery is unavailable."""
+    from app.services.doc_service import doc_service
+    from app.retrieval.bm25_retriever import build_bm25_index_from_db
+
+    parsed_doc, chunks = doc_service.process_document_pipeline(file_path, file_type)
+    chunk_dicts = []
+    for i, chunk in enumerate(chunks):
+        chunk_dicts.append({
+            "document_id": doc_id, "knowledge_base_id": kb_id,
+            "content": chunk.content, "chunk_index": chunk.chunk_index,
+            "chunk_type": chunk.chunk_type,
+            "content_hash": chunk.metadata.get("content_hash") if chunk.metadata else None,
+            "metadata": chunk.metadata or {},
+        })
+
+    orm_chunks = await chunk_crud.bulk_create(db, chunk_dicts)
+
+    try:
+        milvus = _get_milvus()
+        milvus._ensure_partition(kb_id)
+        idx_chunks = [{"id": c.id, "content": c.content} for c in orm_chunks
+                       if c.chunk_type in ("child", "text") and c.content and c.content.strip()]
+        if idx_chunks:
+            kb_security = kb.security_level
+            kb_dept = kb.department or "_"
+            for i in range(0, len(idx_chunks), 10):
+                batch = idx_chunks[i:i + 10]
+                contents = [c["content"] for c in batch]
+                embeddings = _get_dense().embed_documents(contents)
+                if embeddings and len(embeddings) == len(batch):
+                    milvus.insert_vectors(
+                        chunk_ids=[c["id"] for c in batch],
+                        embeddings=embeddings, contents=contents, kb_id=kb_id,
+                        security_levels=[kb_security] * len(batch),
+                        departments=[kb_dept] * len(batch),
+                    )
+    except Exception as e:
+        logger.warning("Milvus indexing failed (non-fatal): %s", e)
+
+    indexable = await chunk_crud.get_indexable(db, kb_id)
+    build_bm25_index_from_db(kb_id, indexable, _bm25)
+
+    await doc_crud.update_status(db, doc_id, status="completed", chunk_count=len(chunks), is_indexed=True)
+    await kb_crud.update_counts(db, kb_id, doc_delta=1, chunk_delta=len(chunks))
+
+    try:
+        os.unlink(file_path)
+    except Exception:
+        pass
 
 
 @router.get("/{kb_id}/documents", response_model=List[DocumentResponse])

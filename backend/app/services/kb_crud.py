@@ -24,12 +24,16 @@ class KnowledgeBaseCRUD:
         description: Optional[str] = None,
         kb_type: str = "document",
         created_by: Optional[str] = None,
+        department: str = "_",
+        security_level: int = 1,
     ) -> KnowledgeBase:
         kb = KnowledgeBase(
             name=name,
             description=description,
             kb_type=kb_type,
             created_by=created_by,
+            department=department,
+            security_level=security_level,
         )
         db.add(kb)
         await db.flush()

@@ -37,14 +37,18 @@ with tab_kb:
             c1, c2 = st.columns(2)
             with c1:
                 kb_name = st.text_input("名称", placeholder="例如：产品文档")
-            with c2:
                 kb_type = st.selectbox("类型", ["document", "faq", "wiki"])
+            with c2:
+                kb_dept = st.selectbox("部门", ["_通用", "engineering", "product", "hr", "finance", "ops"])
+                kb_sec = st.selectbox("密级", ["0-公开", "1-内部", "2-机密", "3-绝密"], index=1)
             kb_desc = st.text_area("描述（可选）", placeholder="知识库用途说明")
             submitted = st.form_submit_button("创建", use_container_width=True)
             if submitted and kb_name:
                 try:
+                    dept = kb_dept.split("-")[0] if "-" in kb_dept else "_"
+                    sec = int(kb_sec.split("-")[0])
                     result = api.create_kb(name=kb_name, description=kb_desc or None,
-                                           kb_type=kb_type)
+                                           kb_type=kb_type, department=dept, security_level=sec)
                     st.success(f"✅ 知识库 '{result['name']}' 创建成功")
                     load_kb_list()
                     st.rerun()
@@ -149,21 +153,14 @@ with tab_upload:
                             original_name=uf.name,
                         )
 
-                        # Cleanup temp
                         try:
                             os.unlink(tmp_path)
                         except Exception:
                             pass
 
-                        status.update(
-                            label=f"✅ {uf.name} — {result.get('chunk_count', 0)} 个片段",
-                            state="complete",
-                        )
+                        status.update(label=f"✅ {uf.name} — 已上传", state="complete")
                     except Exception as e:
-                        status.update(
-                            label=f"❌ {uf.name} 失败: {str(e)[:150]}",
-                            state="error",
-                        )
+                        status.update(label=f"❌ {uf.name} 失败: {str(e)[:150]}", state="error")
 
             load_kb_list()
             st.success("所有文件处理完成！可切换到会话页开始提问")

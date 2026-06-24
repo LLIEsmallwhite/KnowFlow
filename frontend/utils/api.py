@@ -54,10 +54,12 @@ class KnowFlowAPI:
         return self._get("/api/v1/knowledge-bases")
 
     def create_kb(self, name: str, description: str = None,
-                  kb_type: str = "document") -> dict:
+                  kb_type: str = "document", department: str = "_",
+                  security_level: int = 1) -> dict:
         r = self.client.post(
             self._url("/api/v1/knowledge-bases"),
-            json={"name": name, "description": description, "kb_type": kb_type},
+            json={"name": name, "description": description, "kb_type": kb_type,
+                  "department": department, "security_level": security_level},
         )
         r.raise_for_status()
         return r.json()

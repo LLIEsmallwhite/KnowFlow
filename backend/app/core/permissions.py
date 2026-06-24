@@ -29,11 +29,12 @@ class PermissionFilter:
     @property
     def milvus_expr(self) -> str:
         """Build Milvus pre-filter expression."""
-        parts = []
-        parts.append(f"security_level <= {self.max_security}")
+        parts = [f"security_level <= {self.max_security}"]
         if self.departments:
-            deps = ", ".join(f'"{d}"' for d in self.departments)
-            parts.append(f"department in [{deps}]")
+            deps = [d for d in self.departments if d and d != "_"]
+            if deps:
+                dlist = ", ".join(f'"{d}"' for d in deps)
+                parts.append(f"department in [{dlist}]")
         return " AND ".join(parts)
 
     @property

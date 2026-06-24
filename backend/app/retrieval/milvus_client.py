@@ -114,7 +114,7 @@ class MilvusClient:
 
     def _create_collection_internal(self):
         """Create Milvus collection with custom schema."""
-        schema = PyMilvusClient.create_schema(enable_dynamic_field=False)
+        schema = PyMilvusClient.create_schema(enable_dynamic_field=True)
 
         # add_field signature: (field_name, datatype, **kwargs)
         schema.add_field(PRIMARY_FIELD, DataType.INT64, is_primary=True, auto_id=True)
@@ -241,15 +241,16 @@ class MilvusClient:
         # 构建插入数据 — MilvusClient 使用 list-of-dicts 格式
         data = []
         for i in range(n):
-            data.append({
+            row = {
                 VECTOR_FIELD: embeddings[i],
                 CHUNK_ID_FIELD: chunk_ids[i],
                 KB_ID_FIELD: kb_id,
                 DOC_ID_FIELD: doc_ids[i],
                 CONTENT_FIELD: contents[i],
                 SECURITY_FIELD: security_levels[i] if security_levels else 1,
-                DEPT_FIELD: departments[i] if departments else "",
-            })
+                DEPT_FIELD: (departments[i] if departments else "") or "_",
+            }
+            data.append(row)
 
         try:
             result = self._client.insert(

@@ -144,6 +144,42 @@ class ChunkCRUD:
         logger.info("Deleted %d chunks from doc '%s'", result.rowcount, doc_id)
         return result.rowcount
 
+    # ─── Sync methods for Celery worker ───
+
+    def sync_bulk_create(self, sync_db, chunks: List[Dict]) -> list:
+        """Sync version of bulk_create for Celery tasks."""
+        from app.models.chunk import Chunk
+        orm_chunks = []
+        for c in chunks:
+            orm_chunks.append(Chunk(
+                document_id=c["document_id"], knowledge_base_id=c["knowledge_base_id"],
+                content=c["content"], chunk_index=c.get("chunk_index", 0),
+                chunk_type=c.get("chunk_type", "text"),
+                content_hash=c.get("content_hash"),
+                parent_chunk_id=c.get("parent_chunk_id"),
+                extra_metadata=c.get("metadata"),
+                security_level=c.get("security_level", 1),
+                department=c.get("department", ""),
+                is_indexed=False,
+            ))
+        sync_db.add_all(orm_chunks)
+        sync_db.flush()
+        for chunk in orm_chunks:
+            sync_db.refresh(chunk)
+        return orm_chunks
+
+    def sync_get_indexable(self, sync_db, kb_id: str) -> List[Dict]:
+        """Sync version of get_indexable."""
+        from app.models.chunk import Chunk
+        chunks = sync_db.query(Chunk).filter(
+            Chunk.knowledge_base_id == kb_id,
+            Chunk.is_enabled == True,
+            Chunk.chunk_type.in_(["child", "text"]),
+        ).all()
+        return [{"id": c.id, "chunk_id": c.id, "content": c.content,
+                 "chunk_index": c.chunk_index, "chunk_type": c.chunk_type,
+                 "document_id": c.document_id} for c in chunks]
+
     async def mark_indexed(
         self,
         db: AsyncSession,

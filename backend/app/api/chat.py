@@ -289,10 +289,18 @@ async def chat_stream(
                     chunk_doc_map[cid] = doc_cache[doc_id]
                     chunk_doc_map[(content or "")[:80]] = doc_cache[doc_id]
 
+                # Prefer BM25 doc names (keyword-matched, more accurate)
+                bm25_doc_map = {}
+                for kb in shared_bm25.get_indexed_kbs():
+                    for chunk in shared_bm25._chunks.get(kb, []):
+                        cid = chunk.get("chunk_id", "")
+                        name = chunk.get("doc_title", "") or chunk.get("doc_filename", "")
+                        if cid and name:
+                            bm25_doc_map[cid] = name
+
                 seen_content = set()
                 for ctx in merged:
                     for cid in ctx.chunk_ids[:3]:
-                        # Skip chunks not in DB (stale Milvus data)
                         if cid not in valid_ids and cid not in chunk_doc_map:
                             continue
                         content_sig = ctx.content[:100]
@@ -300,7 +308,8 @@ async def chat_stream(
                             continue
                         seen_content.add(content_sig)
 
-                        display_name = chunk_doc_map.get(cid, "")
+                        # Prefer BM25 doc name, fallback to DB
+                        display_name = bm25_doc_map.get(cid, "") or chunk_doc_map.get(cid, "")
                         if not display_name:
                             display_name = chunk_doc_map.get(ctx.content[:80], "")
 
