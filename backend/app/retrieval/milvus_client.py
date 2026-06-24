@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 # Collection 主键字段
 PRIMARY_FIELD = "pk_id"           # 自增主键
 # 向量字段
-VECTOR_FIELD = "embedding"        # 向量 (FloatVector)
-# 标量字段（用于过滤和关联）
-CHUNK_ID_FIELD = "chunk_id"       # Chunk UUID（与 PostgreSQL 关联）
-KB_ID_FIELD = "kb_id"             # 知识库 ID（用于 Partition 过滤）
-DOC_ID_FIELD = "doc_id"           # 文档 ID
-CONTENT_FIELD = "content"         # 原始文本
+VECTOR_FIELD = "embedding"
+CHUNK_ID_FIELD = "chunk_id"
+KB_ID_FIELD = "kb_id"
+DOC_ID_FIELD = "doc_id"
+CONTENT_FIELD = "content"
+SECURITY_FIELD = "security_level"   # RBAC pre-filter
+DEPT_FIELD = "department"           # RBAC pre-filter
 
-# 向量维度
 VECTOR_DIM = settings.EMBEDDING_DIMENSION
 
 
@@ -123,6 +123,8 @@ class MilvusClient:
         schema.add_field(KB_ID_FIELD, DataType.VARCHAR, max_length=64)
         schema.add_field(DOC_ID_FIELD, DataType.VARCHAR, max_length=64)
         schema.add_field(CONTENT_FIELD, DataType.VARCHAR, max_length=65535)
+        schema.add_field(SECURITY_FIELD, DataType.INT64)  # 0-3 clearance
+        schema.add_field(DEPT_FIELD, DataType.VARCHAR, max_length=64)
 
         index_params = PyMilvusClient.prepare_index_params()
         index_params.add_index(
@@ -205,6 +207,8 @@ class MilvusClient:
         contents: List[str],
         kb_id: str,
         doc_ids: Optional[List[str]] = None,
+        security_levels: Optional[List[int]] = None,
+        departments: Optional[List[str]] = None,
     ) -> List[int]:
         """
         批量插入向量
@@ -243,6 +247,8 @@ class MilvusClient:
                 KB_ID_FIELD: kb_id,
                 DOC_ID_FIELD: doc_ids[i],
                 CONTENT_FIELD: contents[i],
+                SECURITY_FIELD: security_levels[i] if security_levels else 1,
+                DEPT_FIELD: departments[i] if departments else "",
             })
 
         try:
@@ -269,6 +275,7 @@ class MilvusClient:
         kb_ids: Optional[List[str]] = None,
         top_k: int = 50,
         threshold: float = 0.15,
+        permission_expr: str = "",
     ) -> List[SearchResult]:
         """
         向量相似度检索
@@ -289,14 +296,17 @@ class MilvusClient:
             "params": {"nprobe": 16},
         }
 
-        # 构建过滤表达式（按知识库过滤）
-        filter_expr = ""
+        # Build filter: KB filter + permission pre-filter
+        parts = []
         if kb_ids and len(kb_ids) > 0:
             if len(kb_ids) == 1:
-                filter_expr = f'{KB_ID_FIELD} == "{kb_ids[0]}"'
+                parts.append(f'{KB_ID_FIELD} == "{kb_ids[0]}"')
             else:
                 kb_list = ", ".join(f'"{kb}"' for kb in kb_ids)
-                filter_expr = f"{KB_ID_FIELD} in [{kb_list}]"
+                parts.append(f"{KB_ID_FIELD} in [{kb_list}]")
+        if permission_expr:
+            parts.append(f"({permission_expr})")
+        filter_expr = " AND ".join(parts) if parts else ""
 
         try:
             # MilvusClient.search 返回 List[List[dict]]

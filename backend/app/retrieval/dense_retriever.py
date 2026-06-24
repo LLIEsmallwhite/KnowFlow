@@ -80,8 +80,9 @@ class DenseRetriever:
         top_k: int = 50,
         threshold: float = 0.15,
         query_embedding: Optional[List[float]] = None,
+        permission_expr: str = "",
     ) -> List[SearchResult]:
-        """Execute dense vector search."""
+        """Execute dense vector search with permission pre-filter."""
         if query_embedding is None:
             query_embedding = self.embed_query(query)
 
@@ -90,9 +91,7 @@ class DenseRetriever:
             kb_ids=kb_ids,
             top_k=top_k,
             threshold=threshold,
+            permission_expr=permission_expr,
         )
-        logger.info(
-            "Dense search: query='%s...', kbs=%s, results=%d",
-            query[:50], kb_ids, len(results),
-        )
+        logger.info("Dense search: query='%s...', kbs=%s, results=%d", query[:50], kb_ids, len(results))
         return results

@@ -93,9 +93,19 @@ class KnowledgeBase(Base):
 
     # ─── 归属 ───
     created_by: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        nullable=True,
-        comment="创建者用户 ID",
+        String(36), nullable=True, comment="创建者用户 ID",
+    )
+
+    # ─── 安全标签 (RBAC Pre-filter) ───
+    department: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True, comment="所属部门: engineering / product / hr 等",
+    )
+    security_level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1,
+        comment="密级: 0=公开 1=内部 2=机密 3=绝密",
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True, comment="所属项目 ID",
     )
 
     # ─── 状态 ───

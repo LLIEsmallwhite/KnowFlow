@@ -84,6 +84,7 @@ class HybridSearchOrchestrator:
         keyword_top_k: int = 50,
         vector_threshold: float = 0.15,
         keyword_threshold: float = None,
+        permission_expr: str = "",
     ) -> HybridSearchResult:
         """
         执行混合检索（并行）
@@ -112,7 +113,7 @@ class HybridSearchOrchestrator:
             # 提交向量检索
             vector_future = executor.submit(
                 self._safe_vector_search,
-                query, kb_ids, vector_top_k, vector_threshold,
+                query, kb_ids, vector_top_k, vector_threshold, permission_expr,
             )
 
             # 提交关键词检索
@@ -138,6 +139,7 @@ class HybridSearchOrchestrator:
 
     def _safe_vector_search(
         self, query: str, kb_ids: List[str], top_k: int, threshold: float,
+        permission_expr: str = "",
     ) -> tuple:
         """安全执行向量检索（捕获异常）"""
         try:
@@ -146,6 +148,7 @@ class HybridSearchOrchestrator:
                 kb_ids=kb_ids,
                 top_k=top_k,
                 threshold=threshold,
+                permission_expr=permission_expr,
             )
             return results, None
         except Exception as e:

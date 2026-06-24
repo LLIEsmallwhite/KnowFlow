@@ -293,11 +293,16 @@ async def upload_document(
                 contents = [c["content"] for c in idx_chunks]
                 embeddings = _get_dense().embed_documents(contents)
                 if embeddings and len(embeddings) == len(idx_chunks):
+                    n = len(idx_chunks)
+                    kb_security = kb.security_level
+                    kb_dept = kb.department or ""
                     milvus.insert_vectors(
                         chunk_ids=[c["id"] for c in idx_chunks],
                         embeddings=embeddings,
                         contents=contents,
                         kb_id=kb_id,
+                        security_levels=[kb_security] * n,
+                        departments=[kb_dept] * n,
                     )
                     # Mark as indexed
                 await chunk_crud.mark_indexed(db, [c["id"] for c in idx_chunks])

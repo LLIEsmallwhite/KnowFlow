@@ -222,8 +222,17 @@ async def chat_stream(
             except Exception:
                 pass
 
+            # Build permission pre-filter for RBAC
+            from app.core.permissions import build_permission_filter
+            from app.core.dependencies import get_current_user
+            perm_filter = build_permission_filter(None)  # Will be user-aware when auth wired
+            logger.info("Permission filter: %s", perm_filter.milvus_expr)
+
             orchestrator = _get_hybrid_search()
-            hr = orchestrator.search(query=rewritten, kb_ids=kb_ids if kb_ids else None)
+            hr = orchestrator.search(
+                query=rewritten, kb_ids=kb_ids if kb_ids else None,
+                permission_expr=perm_filter.milvus_expr,
+            )
             search_info["vector_hits"] = len(hr.vector_results)
             search_info["keyword_hits"] = len(hr.keyword_results)
 

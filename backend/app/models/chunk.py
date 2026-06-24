@@ -107,6 +107,14 @@ class Chunk(Base):
         comment="Milvus 中的向量 ID（用于更新/删除）",
     )
 
+    # ─── 安全标签 (denormalized for pre-filter) ───
+    security_level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, comment="密级: 0=公开 1=内部 2=机密 3=绝密",
+    )
+    department: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="所属部门 (继承自 KB)",
+    )
+
     # ─── 状态标记 ───
     is_enabled: Mapped[bool] = mapped_column(
         Boolean,

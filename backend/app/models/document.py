@@ -114,6 +114,11 @@ class Document(Base):
         comment="来源 URL（如网页抓取）",
     )
 
+    # ─── 安全标签 ───
+    security_level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, comment="继承自 KB 的密级",
+    )
+
     # ─── 状态标记 ───
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_indexed: Mapped[bool] = mapped_column(
