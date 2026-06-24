@@ -1,23 +1,62 @@
 """
 Sidebar component for KnowFlow.
-
-Renders the left sidebar with:
-- KB selector (loaded from API)
-- Session list
-- Settings panel
-- New chat button
 """
 
 import streamlit as st
 from utils.session import get_api, load_kb_list, start_new_chat
+from utils.api import KnowFlowAPI
 
 
 def render_sidebar():
-    """Render the main app sidebar. Returns selected settings."""
+    """Render the main app sidebar."""
     api = get_api()
 
     with st.sidebar:
         st.markdown("## 🤖 KnowFlow")
+
+        # ─── Login / Register ───
+        if not st.session_state.get("logged_in"):
+            with st.expander("🔑 登录 / 注册", expanded=True):
+                tab1, tab2 = st.tabs(["登录", "注册"])
+                with tab1:
+                    email = st.text_input("邮箱", key="login_email")
+                    pwd = st.text_input("密码", type="password", key="login_pwd")
+                    if st.button("登录", use_container_width=True):
+                        try:
+                            result = api.login(email, pwd)
+                            st.session_state.logged_in = True
+                            st.session_state.auth_token = api.token
+                            st.session_state.username = result.get("username", "")
+                            st.session_state.api = KnowFlowAPI(token=api.token)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"登录失败: {e}")
+                with tab2:
+                    reg_user = st.text_input("用户名", key="reg_user")
+                    reg_email = st.text_input("邮箱", key="reg_email")
+                    reg_pwd = st.text_input("密码", type="password", key="reg_pwd")
+                    if st.button("注册", use_container_width=True):
+                        try:
+                            result = api.register(reg_user, reg_email, reg_pwd)
+                            st.session_state.logged_in = True
+                            st.session_state.auth_token = api.token
+                            st.session_state.username = result.get("username", "")
+                            st.session_state.api = KnowFlowAPI(token=api.token)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"注册失败: {e}")
+            st.markdown("---")
+            st.stop()  # Don't render the rest until logged in
+
+        # Logged in — show user info + logout
+        st.caption(f"👤 {st.session_state.get('username', '')}")
+        if st.button("🚪 退出登录", use_container_width=True):
+            api.logout()
+            st.session_state.logged_in = False
+            st.session_state.auth_token = None
+            st.session_state.username = ""
+            st.session_state.api = KnowFlowAPI()
+            st.rerun()
         st.markdown("---")
 
         # ─── Knowledge Base Selector ───

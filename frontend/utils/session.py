@@ -12,10 +12,7 @@ from utils.api import KnowFlowAPI
 def init_session_state():
     """Initialize all session state defaults if not already set."""
     defaults = {
-        # API client
-        "api": None,  # Lazy init below
-
-        # Chat state
+        "api": None,
         "messages": [],
         "current_session_id": None,
         "selected_kb_ids": [],
@@ -23,19 +20,21 @@ def init_session_state():
         "enable_memory": True,
         "selected_model": "deepseek-chat",
         "temperature": 0.1,
-
-        # UI state
         "sidebar_kb_list": [],
         "kbs_loaded": False,
+        # Auth
+        "logged_in": False,
+        "auth_token": None,
+        "username": "",
     }
 
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
 
-    # Lazy-init API client
+    # Init API client with stored token
     if st.session_state.api is None:
-        st.session_state.api = KnowFlowAPI()
+        st.session_state.api = KnowFlowAPI(token=st.session_state.auth_token)
 
 
 def get_api() -> KnowFlowAPI:
